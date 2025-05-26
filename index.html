@@ -23,11 +23,11 @@
     <meta property="og:image:height" content="512">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://kaist-cvlab.github.io/NoVA/">
-    <meta property="og:title" content="GSD: Geometry-Aware Score Distillation via 3D Consistent Noising and Gradient Consistency Modeling">
+    <meta property="og:title" content="NoVA: Aligned Novel View Image and Geometry Synthesis via Cross-modal Attention Instillation">
     <meta property="og:description" content="">
 
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="GSD: Geometry-Aware Score Distillation via 3D Consistent Noising and Gradient Consistency Modeling">
+    <meta name="twitter:title" content="NoVA: Aligned Novel View Image and Geometry Synthesis via Cross-modal Attention Instillation">
     <!-- <meta name="twitter:description" content=""> -->
     <!-- <meta name="twitter:image" content="img/cats.png"> -->
 
@@ -56,7 +56,7 @@
     <div class="container" id="header" style="text-align: center; margin: auto;">
         <div class="row" id="title-row" style="max-width: 100%; margin: 0 auto; display: inline-block">
             <h2 class="col-md-12 text-center" id="title">
-                <b>GSD</b>: Geometry-Aware Score Distillation via  <br> 3D Consistent Noising and Gradient Consistency Modeling <br>
+                <b>NoVA</b>: Aligned Novel View Image and Geometry Synthesis  <br> via Cross-modal Attention Instillation <br>
                 <small>
                     Arxiv 2024
                 </small>
@@ -65,32 +65,36 @@
         <div class="row" id="author-row" style="margin:0 auto;">
             <div class="col-md-12 text-center" style="display: table; margin:0 auto">
                 <a style="text-decoration:none" href="https://mskwak01.github.io/">
-                    Min-Seop&nbsp;Kwak<sup>1</sup>
+                    Min-Seop&nbsp;Kwak<sup>1,2</sup>
                 </a>
                 <span style="padding-left: 20px;"></span>
-                Donghoon Ahn<sup>1</sup>
+                Junho Kim<sup>1</sup>
                 <span style="padding-left: 20px;"></span>
-                <a style="text-decoration:none" href="https://ines-hyeonsu-kim.github.io/">
-                    Ines Hyeonsu Kim<sup>1</sup>
+                Sangdoo Yun<sup>1</sup>
+                <span style="padding-left: 20px;"></span>
+                DongYoon Han<sup>1</sup>
+                <span style="padding-left: 20px;"></span>
+                <!-- <a style="text-decoration:none" href="https://ines-hyeonsu-kim.github.io/">
+                    Ines Hyeonsu Kim<sup>1</sup> -->
                 <!-- </a> -->
-                <br>
+                <br>          
+                <span style="padding-left: 20px;"></span>
+                Taekyoung Kim<sup>1</sup>                    
+                <span style="padding-left: 20px;"></span>
+                <a style="text-decoration:none" href="https://cvlab.kaist.ac.kr/home">
+                    Seungryong Kim<sup>†,2</sup>
                 <span style="padding-left: 20px;"></span>
                 <a style="text-decoration:none" href="http://wityworks.com/">
-                    Jin-Hwa Kim<sup>†,2,3</sup>
-                <!-- </a> -->
-                
-                <span style="padding-left: 20px;"></span>
-                <a style="text-decoration:none" href="https://cvlab.korea.ac.kr/">
-                    Seungryong Kim<sup>†,1</sup>
+                    Jin-Hwa Kim<sup>†,1,3</sup>  
                 </a>
                 <br>
                 <table class="author-table" id="author-table">
                     <tr>
                         <td>
-                            <sup>1</sup>Korea University
+                            <sup>1</sup>NAVER AI Lab
                         </td>
                         <td>
-                            <sup>2</sup>NAVER AI Lab
+                            <sup>2</sup>KAIST
                         </td>
                         <td>
                             <sup>3</sup>AI Institute of Seoul National University
@@ -131,11 +135,11 @@
         <div class="row">
             <div class="col-md-8 col-md-offset-2">
                 <div class="text-center">
-                    <img src="./img/teaser.png" width="100%">
+                    <img src="./img/Teaser_Final.png" width="100%">
                 </div>
 
                 <div class="text-justify">
-                    Our framework incorporates 3D awareness into the score distillation sampling (SDS) process through a 3D consistent noising, which induces consistency of the predicted 2D score. As a general plug-and-play module that can be attached to SDS-based text-to-3D generation baselines with little computation cost, it brings about highly enhanced view consistency and fidelity to 3D generation results across various baselines.
+                    We introduce NoVA, a Novel View-Aligned image and geometry synthesis model, capable of generating novel view images and corresponding geometries at arbitrary target poses, from unposed input reference images — requiring as few as a single reference image. Our approach leverages cross-modal attention distillation, enabling the spatial attention map from image denoising diffusion models to guide the geometry generation diffusion process. 
                 </div>
             </div>
         </div>
