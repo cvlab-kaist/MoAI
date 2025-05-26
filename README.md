@@ -1,2 +1,2 @@
-# NoVA
-Aligned Novel View Image and Geometry Synthesis via Cross-modal Attention Instillation
+This is for Project Page of NoVA!
+The website template was borrowed from <a href="http://mgharbi.com/">Michaël Gharbi

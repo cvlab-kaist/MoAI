@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html><head lang="en"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-K9Z8140XFH"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-K9Z8140XFH');
+</script>
+    
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+
+    <title>GSD</title>
+
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <meta property="og:image" content="img/teaser.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="912">
+    <meta property="og:image:height" content="512">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://kaist-cvlab.github.io/NoVA/">
+    <meta property="og:title" content="GSD: Geometry-Aware Score Distillation via 3D Consistent Noising and Gradient Consistency Modeling">
+    <meta property="og:description" content="">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="GSD: Geometry-Aware Score Distillation via 3D Consistent Noising and Gradient Consistency Modeling">
+    <!-- <meta name="twitter:description" content=""> -->
+    <!-- <meta name="twitter:image" content="img/cats.png"> -->
+
+
+    <!-- mirror: F0%9F%AA%9E&lt -->
+    <link rel="icon" type="image/x-icon" href="img/logo.ico">
+    <!-- <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22&gt;&lt;text y=%22.9em%22 font-size=%2290%22&gt;%E2%9C%A8&lt;/text&gt;&lt;/svg&gt;"> -->
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/font-awesome.min.css">
+    <link rel="stylesheet" href="css/codemirror.min.css">
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="./css/twentytwenty.css">
+
+    <script src="js/jquery.min.js"></script>
+    <script src="js/bootstrap.min.js"></script>
+    <script src="js/codemirror.min.js"></script>
+    <script src="js/clipboard.min.js"></script>
+    <script src="js/video_comparison.js"></script>
+    <script src="js/app.js"></script>
+    <script src="./js/jquery.twentytwenty.js"></script>
+
+</head>
+
+
+<body>
+    <div class="container" id="header" style="text-align: center; margin: auto;">
+        <div class="row" id="title-row" style="max-width: 100%; margin: 0 auto; display: inline-block">
+            <h2 class="col-md-12 text-center" id="title">
+                <b>GSD</b>: Geometry-Aware Score Distillation via  <br> 3D Consistent Noising and Gradient Consistency Modeling <br>
+                <small>
+                    Arxiv 2024
+                </small>
+            </h2>
+        </div>
+        <div class="row" id="author-row" style="margin:0 auto;">
+            <div class="col-md-12 text-center" style="display: table; margin:0 auto">
+                <a style="text-decoration:none" href="https://mskwak01.github.io/">
+                    Min-Seop&nbsp;Kwak<sup>1</sup>
+                </a>
+                <span style="padding-left: 20px;"></span>
+                Donghoon Ahn<sup>1</sup>
+                <span style="padding-left: 20px;"></span>
+                <a style="text-decoration:none" href="https://ines-hyeonsu-kim.github.io/">
+                    Ines Hyeonsu Kim<sup>1</sup>
+                <!-- </a> -->
+                <br>
+                <span style="padding-left: 20px;"></span>
+                <a style="text-decoration:none" href="http://wityworks.com/">
+                    Jin-Hwa Kim<sup>†,2,3</sup>
+                <!-- </a> -->
+                
+                <span style="padding-left: 20px;"></span>
+                <a style="text-decoration:none" href="https://cvlab.korea.ac.kr/">
+                    Seungryong Kim<sup>†,1</sup>
+                </a>
+                <br>
+                <table class="author-table" id="author-table">
+                    <tr>
+                        <td>
+                            <sup>1</sup>Korea University
+                        </td>
+                        <td>
+                            <sup>2</sup>NAVER AI Lab
+                        </td>
+                        <td>
+                            <sup>3</sup>AI Institute of Seoul National University
+                        </td>
+                    </tr>
+                </table>
+                <small>
+                    <sup>†</sup>Co-corresponding authors.
+                </small>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.getElementById('author-row').style.maxWidth = document.getElementById("title-row").clientWidth + 'px';
+    </script>
+    <div class="container" id="main">
+        <div class="row">
+                <div class="col-sm-6 col-sm-offset-3 text-center">
+                    <ul class="nav nav-pills nav-justified">
+                        <li>
+                            <a href="https://arxiv.org/abs/2406.16695" target="_blank">
+                            <img src="./img/paper_image.png" height="60px">
+                                <h4><strong>Paper</strong></h4>
+                            </a>
+                        </li>
+                        <li>
+                            <!-- <a href="" target="_blank"> -->
+                            <a href="https://github.com/KU-CVLAB/GSD" target="_blank">
+                                <image src="img/github.png" height="60px">
+                                <h4><strong>Code Coming Soon</strong></h4>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+        </div>
+
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2">
+                <div class="text-center">
+                    <img src="./img/teaser.png" width="100%">
+                </div>
+
+                <div class="text-justify">
+                    Our framework incorporates 3D awareness into the score distillation sampling (SDS) process through a 3D consistent noising, which induces consistency of the predicted 2D score. As a general plug-and-play module that can be attached to SDS-based text-to-3D generation baselines with little computation cost, it brings about highly enhanced view consistency and fidelity to 3D generation results across various baselines.
+                </div>
+            </div>
+        </div>
+
+        <br>
+
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
+                <h4>
+                    <b>3D Consistency Enhancement Results</b>
+                </h4>
+                <div class="text-center">
+                <video id="ide" width="100%" playsinline autoplay loop muted controls style="margin-top: 10px;">
+                    <source src="video/3Dgen_video.mp4" type="video/mp4" />
+                </div>
+                <br>
+                The incorporation of our GSD framework drastically enhances the geometric 3D consistency of generated scenes.
+                <br>
+            </video>
+            </div>
+        </div>
+
+        <br>
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
+                <h4>
+                    <b>3D Consistent Integral Noising</b>
+                </h4>
+                <div class="text-center">
+                    <img src="./img/noising.png" width="85%">
+                </div>
+                To produce a geometry-aware, 3D consistent 2D noise map that preserves the Gaussian properties of the standard normal distribution, we conduct 3D conditional upsampling of noised point clouds along with discrete integral of projected noise values, inspired by <a href="https://warpyournoise.github.io/"><i>2D integral noising</i></a>.
+                <br>
+                <div class="text-center">
+                <video id="ide" width="100%" playsinline autoplay loop muted controls style="margin-top: 10px;">
+                    <source src="video/noising_video_g.mp4" type="video/mp4" />
+                </div>
+                <br>
+                Our 3D consistent integral noising perfectly preserves <b>Gaussian properties</b> that random noise <b>(a)</b> displays, while also demonstrating <b>interpolative qualities</b> that bilinear interpolation <b>(b)</b> possesses. It also remains <b>computationally efficient</b>, capable of being conducted multiple times per single SDS iteration, in contrast to 2D integral noising <b>(d)</b>.  
+                <br>
+                <br>
+                <div class="text-center">
+                    <img src="./img/noise_analysis.png" width="80%">
+                </div>
+            </video>
+            </div>
+        </div>
+
+        <br>
+
+        <!-- <div class="row">
+            <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
+                <h4>
+                    <b>3D Consistency Enhancement Results</b>
+                </h4>
+                <div class="text-center">
+                <video id="ide" width="100%" playsinline autoplay loop muted controls style="margin-top: 10px;">
+                    <source src="video/3Dgen_video.mp4" type="video/mp4" />
+                </div>
+                <br>
+                The incorporation of our GSD framework drastically enhances the geometric 3D consistency of generated scenes.
+                <br>
+            </video>
+            </div>
+        </div> -->
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
+                <h4>
+                    <b>Interpreting Initial Geometry Towards 3D View Consistency</b>
+                </h4>
+                <p class="text-justify">
+                    In the experiment demonstrate below, even though the conditioning geometry is completely identical due to constraint by 3DFuse, the incorporation of our methodology with gradient consistency modeling encourages a more view-consistent and realistic interpretation of this given geometry, outputting a drastically enhanced 3D scene optimization result with Janus problem removed.
+                <div class="text-center">
+                    <img src="./img/visual.png" width="100%">
+                </div>
+            </div>
+        </div>
+
+        <br>
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
+                <h4>
+                    <b>Enhancement in Convergence Speed</b>
+                </h4>
+                <p class="text-justify">
+                    Comparison between na<span>&#239;</span>ve SDS our 3D-aware <b>GSD</b> shows that our method of 3D consistent noising and similarity loss achieves quicker convergence over baseline, GaussianDreamer. The prompt <i>"a full body of a cat with a hat"</i> is used.
+                <div class="text-center">
+                    <img src="./img/convergence_speed.png" width="84%">
+                </div>
+            </div>
+        </div>
+
+        <br>
+
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
+                <h4>
+                    <b>Overall Framework</b>
+                </h4>
+                <div class="text-justify">
+                    Our framework consists of three components for geometry-aware score distillation: 3D consistent noising, geometry-based gradient warping, and gradient consistency modeling.
+                    Through these components, our framework encourages multiview consistency between predicted 2D scores and enhances the quality of generated 3D scenes.
+                </div>
+                <br>
+
+                <div class="text-center">
+                    <img src="./img/framework.png" width="85%">
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
+                <h4>
+                    <b>Abstract</b>
+                </h4>
+                <div style="width: 100%;">
+                    <!-- <img src="img/motivation_1.png" style="float: right; width: 40%; height: auto; margin-left: 20px;"> -->
+                    <div class="text-justify">
+                        Score distillation sampling (SDS), the methodology in which the score 
+                        from pretrained 2D diffusion models is distilled into 3D representation, 
+                        has recently brought significant advancements in text-to-3D generation task. 
+                        However, this approach is still confronted with critical geometric 
+                        inconsistency problems such as the Janus problem. 
+                        Starting from a hypothesis that such inconsistency problems may be induced by multiview 
+                        inconsistencies between 2D scores predicted from various viewpoints, 
+                        we introduce <b>GSD</b>, a simple and general plug-and-play framework 
+                        for incorporating 3D consistency and therefore geometry awareness into the SDS process. 
+                        Our methodology is composed of three components: 3D consistent noising, 
+                        designed to produce 3D consistent noise maps that perfectly follow the standard Gaussian distribution, 
+                        geometry-based gradient warping for identifying correspondences between predicted gradients of different viewpoints, 
+                        and novel gradient consistency loss to optimize the scene geometry toward producing more consistent gradients. 
+                        We demonstrate that our method significantly improves performance, successfully addressing the geometric inconsistency problems 
+                        in text-to-3D generation task with minimal computation cost and being compatible with existing score distillation-based models.
+                        </div>
+                </div>
+                
+                <br>
+            </div>
+        </div>
+
+
+
+            <div class="row">
+                <div class="col-md-8 col-md-offset-2" style="margin-bottom: 5px;">
+                    <h4>
+                       <b>Citation</b>
+                    </h4>
+                    <div class="form-group col-md-10 col-md-offset-1">
+                        <textarea id="bibtex" class="form-control" readonly>
+
+@article{kwak2024gsd,
+  title={GSD: Geometry-Aware Score Distillation via 3D Consistent Noising and Gradient Consistency Modeling},
+  author={Kwak, Min-Seop and Ahn, Donghoon and Kim, Ines Hyeonsu and Kim, Jin-Hwa and Kim, Seungryong},
+  journal={arXiv preprint arXiv:2406.16695},
+  year={2024}
+}
+                        </textarea>
+                    </div>
+                </div>
+            </div>
+<!-- 
+            <div class="row">
+                <div class="col-md-8 col-md-offset-2">
+                    <h4>
+                        Acknowledgements
+                    </h4>
+                    <p class="text-justify">
+                        We thank <a href="https://github.com/ONground-Korea">Jisang Han</a> for helping with the 3DGS application in this project page. The website template was borrowed from <a href="http://mgharbi.com/">Michaël Gharbi</a>.
+                    </p>
+                </div>
+            </div> -->
+        </div>
+
+
+        </div>
+        </div>
+
+
+        
+
+
+        
+
+
+</body></html>
