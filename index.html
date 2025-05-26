@@ -152,14 +152,15 @@
         <div class="row">
             <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
                 <h4>
-                    <b>3D Consistency Enhancement Results</b>
+                    <b>Generation Results</b>
                 </h4>
                 <div class="text-center">
-                <video id="ide" width="100%" playsinline autoplay loop muted controls style="margin-top: 10px;">
-                    <source src="video/3Dgen_video.mp4" type="video/mp4" />
+                <!-- <video id="ide" width="100%" playsinline autoplay loop muted controls style="margin-top: 10px;">
+                    <source src="video/3Dgen_video.mp4" type="video/mp4" /> -->
+                <img src="./img/Qual_image.png" width="100%">
                 </div>
                 <br>
-                The incorporation of our GSD framework drastically enhances the geometric 3D consistency of generated scenes.
+                We demonstrate our qualitative results, conducting feed-forward novel view synthesis while generating aligned geometry in a robust and consistent manner.
                 <br>
             </video>
             </div>
@@ -168,6 +169,23 @@
         <br>
 
         <div class="row">
+            <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
+                <h4>
+                    <b>Architecture</b>
+                </h4>
+                <div class="text-center">
+                <!-- <video id="ide" width="100%" playsinline autoplay loop muted controls style="margin-top: 10px;">
+                    <source src="video/3Dgen_video.mp4" type="video/mp4" /> -->
+                <img src="./img/full_method.png" width="100%">
+                </div>
+                <br>
+                Our method conducts cross-modal attention instillation, replacing the spatial attention maps of geometry denoising U-Net with image denoising U-Net's spatial attention maps, so that the image generation U-Net learns a more robust representation aligned with the geometry completion task. On the other hand, the geometry prediction networks leverage the rich semantics from image features to enhance geometry completion capability.
+                <br>
+            </video>
+            </div>
+        </div>
+
+        <!-- <div class="row">
             <div class="col-md-8 col-md-offset-2"  style="margin-bottom: 5px;">
                 <h4>
                     <b>3D Consistent Integral Noising</b>
@@ -190,7 +208,7 @@
                 </div>
             </video>
             </div>
-        </div>
+        </div> -->
 
         <br>
 
