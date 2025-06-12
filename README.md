@@ -1,8 +1,8 @@
 # Cross-modal Attention Instillation for Aligned Novel View Image and Geometry Synthesis
 
 [![Project Site](https://img.shields.io/badge/Project-Web-green)](https://cvlab-kaist.github.io/MoAI/) &nbsp;
-<!-- [![Spaces](https://img.shields.io/badge/Spaces-Demo-yellow?logo=huggingface)]() &nbsp;  -->
 [![Github](https://img.shields.io/badge/Github-Repo-orange?logo=github)](https://github.com/cvlab-kaist/MoAI) &nbsp; 
+<!-- [![Spaces](https://img.shields.io/badge/Spaces-Demo-yellow?logo=huggingface)]() &nbsp;  -->
 <!-- [![Models](https://img.shields.io/badge/Models-checkpoints-blue?logo=huggingface)]() &nbsp;  -->
 <!-- [![arXiv](https://img.shields.io/badge/arXiv-2405.17251-red?logo=arxiv)](https://arxiv.org/abs/2405.17251) -->
 
