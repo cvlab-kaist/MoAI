@@ -121,7 +121,7 @@ src_depth = depth_estimator.infer(src_image)
 
 ``` python
 import torch
-from genwarp.ops import camera_lookat, get_projection_matrix
+from ops import camera_lookat, get_projection_matrix
 
 proj_mtx = get_projection_matrix(
     fovy=fovy,
