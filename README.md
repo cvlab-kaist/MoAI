@@ -13,13 +13,13 @@
 | [Citation](#citation)
 | [Acknowledgements](#acknowledgements)
 
-![concept image](https://github.com/user-attachments/assets/2c89bd9c-fa9e-40af-bc27-f00d3e12de3a)
+![concept image](https://github.com/cvlab-kaist/MoAI/blob/main/MoAI/assets/teaser.png)
 
 ## Introduction
 
 This repository is an official implementation for the paper "[Cross-modal Attention Instillation for Aligned Novel View Image and Geometry Synthesis](https://cvlab-kaist.github.io/MoAI/)". We introduce a diffusion-based framework that performs aligned novel view image and geometry generation via a warping‐and‐inpainting methodology. For detailed information, please refer to the [paper](https://arxiv.org/abs/2405.17251).
 
-![Framework](https://github.com/user-attachments/assets/b89d00cf-ea19-4354-b23d-07ccc0ee0f62)
+![Framework](https://github.com/cvlab-kaist/MoAI/blob/main/MoAI/assets/architecture.png)
 
 ## Examples
 
