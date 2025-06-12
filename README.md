@@ -106,9 +106,10 @@ git clone https://github.com/facebookresearch/vggt.git
 
 To use VGGT, please install `requirements_dev.txt` for additional packages.
 
-#### API
+<!-- #### API
 
 **Input Preparation**
+
 Load the input image and estimate the corresponding depth map. Create camera matrices for the intrinsic and extrinsic parameters. [ops.py](genwarp/ops.py) has helper functions to create matrices.
 
 ``` python
@@ -145,7 +146,7 @@ tar_view_mtx = camera_lookat(
 rel_view_mtx = (
     tar_view_mtx @ torch.linalg.inv(src_view_mtx.float())
 ).to(src_image)
-```
+``` -->
 
 ## Citation
 
