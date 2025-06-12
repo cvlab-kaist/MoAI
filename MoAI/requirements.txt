@@ -1,0 +1,21 @@
+torch==2.0.1
+torchvision==0.15.2
+diffusers==0.30.0
+xformers==0.0.22
+accelerate
+transformers==4.36.0
+scipy
+opencv-python
+omegaconf
+einops
+roma
+jaxtyping
+webdataset
+open3d
+wandb
+bitsandbytes==0.45.0
+# git+https://github.com/pesser/splatting
+git+https://github.com/cloneofsimo/lora.git
+trimesh
+pyrender
+gdown
