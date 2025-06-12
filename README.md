@@ -56,7 +56,7 @@ pip install -r requirements_dev.txt
 #### Weight download script
 
 ``` shell
-./scripts/download_models.sh ./checkpoints
+./scripts/download_weights.sh ./checkpoints
 ```
 
 #### Manual download
