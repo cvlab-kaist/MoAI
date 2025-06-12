@@ -21,7 +21,6 @@ import torchvision.transforms as T
 import torch.utils.checkpoint
 import transformers
 import cv2
-# import open3d as o3d
 import multiprocessing as mp
 import inspect
 
@@ -60,24 +59,11 @@ from training_utils import forward_warper, camera_controller, plucker_embedding,
 from torchvision.transforms.functional import to_pil_image
 
 from lora_diffusion import inject_trainable_lora, extract_lora_ups_down
-
-# from dust3r.inference import inference
-# from dust3r.model import AsymmetricCroCo3DStereo
-# from dust3r.utils.image import load_images
-# from dust3r.image_pairs import make_pairs
-# from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
-
-# from dust3r.utils.geometry import find_reciprocal_matches, xy_grid
-
-# from inference_utils import batchify_known
-
 from train_model import embedding_prep
 from train_marigold import mari_embedding_prep
 from run_duster import make_video
 
 import copy
-
-# from genwarp.utils.projector import ndc_rasterizer
 
 from genwarp.utils import (
     reprojector,

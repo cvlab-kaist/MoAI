@@ -70,8 +70,6 @@ from train_marigold import mari_embedding_prep
 
 import copy
 
-# from genwarp.utils.projector import ndc_rasterizer
-
 from genwarp.utils.attn_visualizer import sample_zero_mask_pixels, get_attn_map, stitch_side_by_side
 
 from genwarp.utils import (
@@ -106,16 +104,12 @@ from einops import rearrange, repeat
 from functools import partial
 from camera_visualization import pointmap_vis
 
-# from torch.nn.parallel import DistributedDataParallel as DDP
-
 # real10k
 from dataset.preprocessed_re10k import PreprocessedRe10k
-# megascenes
 from dataset.preprocessed_megascenes import PreprocessedMegaScenes
 
 from transformers import CLIPImageProcessor
 from training_utils import pred_depth_inference
-
 from dataset.scannet import Scannetdataset
 
 warnings.filterwarnings("ignore")
@@ -131,13 +125,6 @@ if not os.path.exists("/tmp/runtime"):
     os.makedirs("/tmp/runtime", mode=0o700)
     
 import open3d as o3d
-
-torch.manual_seed(100)
-
-# os.environ['PYOPENGL_PLATFORM'] = 'egl'  
-# os.environ["PYOPENGL_PLATFORM"] = "osmesa"
-
-# from OpenGL import osmesa
 
 
 class Net(nn.Module):
@@ -206,17 +193,11 @@ class Net(nn.Module):
 
             ref_cond_latents.append(ref_cond[:,:,0,...])
         
-        # if depth_cond:
         tgt_cond_tensor = tgt_coord_embed.to(device="cuda").unsqueeze(2)
         tgt_cond_latent = self.pose_guider(tgt_cond_tensor)
         tgt_cond_latent = tgt_cond_latent[:,:,0,...]
         batch_size = tgt_cond_latent.shape[0]
 
-        # if gt_target_coord_embed != None:
-        #     gt_tgt_cond_tensor = gt_target_coord_embed.to(device="cuda").unsqueeze(2)
-        #     gt_tgt_cond_latent = self.pose_guider(gt_tgt_cond_tensor)
-        #     gt_tgt_cond_latent = gt_tgt_cond_latent[:,:,0,...]
-        
         if not uncond_fwd:
             if not self.inference:
                 ref_timesteps = torch.zeros_like(timesteps)
@@ -363,7 +344,8 @@ class Net(nn.Module):
                     )
                                 
                 geo_noisy_latents = input_dict["geo_pred"]
-                # add warped_image_latent
+                
+                # Add warped_image_latent
                 if n != 0:
                     geo_noisy_latents = torch.cat([warped_image_latents, geo_noisy_latents], dim=1)
                 geo_latent_model_input = torch.cat([geo_noisy_latents] * 2)
