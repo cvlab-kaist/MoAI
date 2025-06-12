@@ -27,11 +27,11 @@ Our model can handle images from various domains including indoor/outdoor scenes
 
 You can find examples on our [project page](https://cvlab-kaist.github.io/MoAI/) and on our [paper](https://arxiv.org/abs/2405.17251). 
 
-![Examples](https://github.com/user-attachments/assets/4490519b-db75-4034-a329-6c62c2b6875b)
+![Examples](https://github.com/cvlab-kaist/MoAI/blob/main/MoAI/assets/Qual_image.png)
 
-Generated novel views can be used for 3D reconstruction. In the example below, we reconstructed a 3D scene via [InstantSplat](https://instantsplat.github.io/). We generated the video using [this implementation](https://github.com/ONground-Korea/unofficial-Instantsplat).
+<!-- Generated novel views can be used for 3D reconstruction. In the example below, we reconstructed a 3D scene via [InstantSplat](https://instantsplat.github.io/). We generated the video using [this implementation](https://github.com/ONground-Korea/unofficial-Instantsplat).
 
-<video autoplay loop src="https://github.com/user-attachments/assets/b3362776-815c-426f-bf39-d04722eb8a6f" width="852" height="480"></video>
+<video autoplay loop src="https://github.com/user-attachments/assets/b3362776-815c-426f-bf39-d04722eb8a6f" width="852" height="480"></video> -->
 
 ## How to use
 
@@ -76,7 +76,7 @@ pip install -r requirements_dev.txt
 The final `checkpoints` directory must look like this:
 
 ```
-genwarp
+MoAI
 └── checkpoints
     ├── image_encoder
     │   ├── config.json
