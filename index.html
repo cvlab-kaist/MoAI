@@ -345,8 +345,7 @@
                 </h4>
                 <div style="width: 100%;">
                     <div class="text-justify">
-                        We introduce a diffusion-based framework that unifies Novel‐View image and Aligned geometry generation via a warping‐and‐inpainting methodology, named NoVA. Unlike prior methods that require dense posed images, or pose‐embedded generative models limited to in‐domain views, NoVA leverages off‐the‐shelf geometry predictors to warp input multi‐view geometries into a target pose and treats novel‐view synthesis as an inpainting task for both image and geometry. To ensure accurate cross‐modal alignment, we propose cross‐modal attention instillation: attention maps from the image diffusion branch are injected into a parallel geometry diffusion branch, aligning semantic cues and ensuring perfect geometric generation without scale‐shift correction. We further introduce proximity‐based mesh conditioning to integrate depth and normal cues, improving sparse geometry interpolation and filtering erroneous projections. Empirically, NoVA achieves high-fidelity extrapolative view synthesis on both image and geometry across a range of unseen scenes, delivers competitive reconstruction quality under interpolation settings, and produces fully aligned colored point clouds for comprehensive 3D completion.
-                    </div>
+                    We introduce a diffusion-based framework that performs aligned novel view image and geometry generation via a warping‐and‐inpainting methodology. Unlike prior methods that require dense posed images or pose‐embedded generative models limited to in‐domain views, our method leverages off‐the‐shelf geometry predictors to predict partial geometries viewed from reference images, and formulates novel‐view synthesis as an inpainting task for both image and geometry. To ensure accurate alignment between generated images and geometry, we propose cross-modal attention distillation, where attention maps from the image diffusion branch are injected into a parallel geometry diffusion branch during both training and inference. This multi-task approach achieves synergistic effects, facilitating geometrically robust image synthesis as well as well-defined geometry prediction. We further introduce proximity‐based mesh conditioning to integrate depth and normal cues, interpolating between point cloud and filtering erroneously predicted geometry from influencing the generation process. Empirically, our method achieves high-fidelity extrapolative view synthesis on both image and geometry across a range of unseen scenes, delivers competitive reconstruction quality under interpolation settings, and produces geometrically aligned colored point clouds for comprehensive 3D completion.                    </div>
                 </div>
                 
                 <br>
@@ -363,12 +362,15 @@
                     <div class="form-group col-md-10 col-md-offset-1">
                         <textarea id="bibtex" class="form-control" readonly>
 
-@article{kwak2024gsd,
-  title={GSD: Geometry-Aware Score Distillation via 3D Consistent Noising and Gradient Consistency Modeling},
-  author={Kwak, Min-Seop and Ahn, Donghoon and Kim, Ines Hyeonsu and Kim, Jin-Hwa and Kim, Seungryong},
-  journal={arXiv preprint arXiv:2406.16695},
-  year={2024}
-}
+                    @article{kwak2025moai,
+                    title={Cross-modal Attention Instillation for Aligned Novel View Image and Geometry Synthesis}, 
+                    author={Min-Seop Kwak and Junho Kim and Sangdoo Yun and Dongyoon Han and Taekyoung Kim and Seungryong Kim and Jin-Hwa Kim},
+                    year={2025},
+                    eprint={2506.UNDECIDED},
+                    archivePrefix={arXiv},
+                    primaryClass={cs.CV},
+                    url={https://arxiv.org/abs/2506.UNDECIDED}, 
+                    }
                         </textarea>
                     </div>
                 </div>
