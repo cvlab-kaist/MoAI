@@ -152,7 +152,7 @@ rel_view_mtx = (
 
 ``` bibtex
 @misc{kwak2025moai,
-  title={Cross-modal Attention Instillation for Aligned Novel View Image and Geometry Synthesis}, 
+  title={Aligned Novel View Image and Geometry Synthesis via Cross-modal Attention Instillation}, 
   author={Min-Seop Kwak and Junho Kim and Sangdoo Yun and Dongyoon Han and Taekyoung Kim and Seungryong Kim and Jin-Hwa Kim},
   year={2025},
   eprint={2506.UNDECIDED},
