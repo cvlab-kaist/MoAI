@@ -106,7 +106,7 @@ git clone https://github.com/facebookresearch/vggt.git
 
 To use VGGT, please install `requirements_dev.txt` for additional packages.
 
-**Initialization**
+<!-- **Initialization**
 
 Import MoAI class and instantiate it with a config. Set the path to the checkpoints directory to `pretrained_model_path` and select the model version in `checkpoint_name`. For more options, check out [run_inference.py](MoAI/run_inference.py)
 
@@ -120,7 +120,7 @@ moai_cfg = dict(
 )
 moai_nvs = MoAI(cfg=moai_full_cfg)
 
-```
+``` -->
 
 <!-- #### API
 
