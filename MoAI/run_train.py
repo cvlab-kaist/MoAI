@@ -45,13 +45,13 @@ from time import gmtime, strftime
 from torchvision.transforms import ToTensor
 from torchvision.utils import save_image
 
-from genwarp.models.resnet import InflatedConv3d, InflatedGroupNorm
-from genwarp.models.mutual_self_attention import ReferenceAttentionControl
-from genwarp.models.pose_guider import PoseGuider
-from genwarp.models.unet_2d_condition import UNet2DConditionModel
-from genwarp.models.unet_3d import UNet3DConditionModel
-from genwarp.models.hook import UNetCrossAttentionHooker, XformersCrossAttentionHooker
-from genwarp.pipelines.pipeline_nvs import NVSPipeline
+from main.models.resnet import InflatedConv3d, InflatedGroupNorm
+from main.models.mutual_self_attention import ReferenceAttentionControl
+from main.models.pose_guider import PoseGuider
+from main.models.unet_2d_condition import UNet2DConditionModel
+from main.models.unet_3d import UNet3DConditionModel
+from main.models.hook import UNetCrossAttentionHooker, XformersCrossAttentionHooker
+from main.pipelines.pipeline_nvs import NVSPipeline
 from training_utils import delete_additional_ckpt, import_filename, seed_everything, load_model
 from einops import rearrange
 
@@ -65,7 +65,7 @@ from run_duster import make_video
 
 import copy
 
-from genwarp.utils import (
+from main.utils import (
     reprojector,
     ndc_rasterizer,
     get_rays,

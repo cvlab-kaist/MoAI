@@ -50,13 +50,13 @@ from time import gmtime, strftime
 from torchvision.transforms import ToTensor, ToPILImage
 from torchvision.utils import save_image
 
-from genwarp.models.resnet import InflatedConv3d, InflatedGroupNorm
-from genwarp.models.mutual_self_attention import ReferenceAttentionControl
-from genwarp.models.pose_guider import PoseGuider
-from genwarp.models.unet_2d_condition import UNet2DConditionModel
-from genwarp.models.unet_3d import UNet3DConditionModel
-from genwarp.models.hook import UNetCrossAttentionHooker, XformersCrossAttentionHooker
-from genwarp.pipelines.pipeline_nvs import NVSPipeline
+from main.models.resnet import InflatedConv3d, InflatedGroupNorm
+from main.models.mutual_self_attention import ReferenceAttentionControl
+from main.models.pose_guider import PoseGuider
+from main.models.unet_2d_condition import UNet2DConditionModel
+from main.models.unet_3d import UNet3DConditionModel
+from main.models.hook import UNetCrossAttentionHooker, XformersCrossAttentionHooker
+from main.pipelines.pipeline_nvs import NVSPipeline
 from training_utils import delete_additional_ckpt, import_filename, seed_everything, load_model
 from einops import rearrange
 
@@ -70,9 +70,9 @@ from train_marigold import mari_embedding_prep
 
 import copy
 
-from genwarp.utils.attn_visualizer import sample_zero_mask_pixels, get_attn_map, stitch_side_by_side
+from main.utils.attn_visualizer import sample_zero_mask_pixels, get_attn_map, stitch_side_by_side
 
-from genwarp.utils import (
+from main.utils import (
     reprojector,
     ndc_rasterizer,
     get_rays,
@@ -133,8 +133,6 @@ class Net(nn.Module):
         reference_unet: UNet2DConditionModel,
         denoising_unet: UNet3DConditionModel,
         geometry_unet: UNet3DConditionModel,
-        geometry_unet_2,
-        geometry_unet_3,
         geo_reference_unet,
         pose_guider: PoseGuider,
         reference_control_writer,
@@ -147,8 +145,6 @@ class Net(nn.Module):
         self.reference_unet = reference_unet
         self.denoising_unet = denoising_unet
         self.geometry_unet = geometry_unet
-        self.geometry_unet_2 = geometry_unet_2
-        self.geometry_unet_3 = geometry_unet_3
         self.geo_reference_unet = geo_reference_unet
         self.pose_guider = pose_guider
         self.reference_control_writer = reference_control_writer
@@ -162,23 +158,17 @@ class Net(nn.Module):
         self,
         noisy_latents,
         geo_noisy_latents,
-        geo_noisy_latents_2,
-        geo_noisy_latents_3,
         timesteps,
         ref_image_latents,
         geo_ref_latents,
         clip_image_embeds,
         ref_coord_embeds,
         tgt_coord_embed,
-        uncond_fwd: bool = False,
         correspondence = None,
         weight_dtype = None,
-        gt_target_coord_embed = None,
         task_emb = None,
         attn_proc_hooker=None,
         geo_attn_proc_hooker=None,
-        geo_attn_proc_hooker_2=None,
-        geo_attn_proc_hooker_3=None,
         closest_idx=None,
         val_scheduler=None,
         vae=None
@@ -198,27 +188,33 @@ class Net(nn.Module):
         tgt_cond_latent = tgt_cond_latent[:,:,0,...]
         batch_size = tgt_cond_latent.shape[0]
 
-        if not uncond_fwd:
-            if not self.inference:
-                ref_timesteps = torch.zeros_like(timesteps)
-            else:
-                ref_timesteps = torch.zeros(batch_size * 2).to(ref_image_latents.device)
-                uncond_image_prompt_embeds = torch.zeros_like(clip_image_embeds)
-                
-                clip_image_embeds = torch.cat(
-                    [uncond_image_prompt_embeds, clip_image_embeds], dim=1
-                )
-                
-                ref_image_latents = ref_image_latents.repeat(1,2,1,1,1)
+        ref_timesteps = torch.zeros(batch_size * 2).to(ref_image_latents.device)
+        uncond_image_prompt_embeds = torch.zeros_like(clip_image_embeds)
+        
+        clip_image_embeds = torch.cat(
+            [uncond_image_prompt_embeds, clip_image_embeds], dim=1
+        )
+        
+        ref_image_latents = ref_image_latents.repeat(1,2,1,1,1)
 
-                if self.geo_reference_unet is not None:
-                    geo_ref_latents = geo_ref_latents.repeat(1,2,1,1,1)
-                ref_cond_latents = [ref.repeat(2,1,1,1) for ref in ref_cond_latents]
-                tgt_cond_latent = tgt_cond_latent.repeat(2,1,1,1)
-                                
-            for i, ref_latent in enumerate(ref_image_latents):
-                self.reference_unet(
-                    # ref_latent,
+        if self.geo_reference_unet is not None:
+            geo_ref_latents = geo_ref_latents.repeat(1,2,1,1,1)
+        ref_cond_latents = [ref.repeat(2,1,1,1) for ref in ref_cond_latents]
+        tgt_cond_latent = tgt_cond_latent.repeat(2,1,1,1)
+                            
+        for i, ref_latent in enumerate(ref_image_latents):
+            self.reference_unet(
+                # ref_latent,
+                geo_ref_latents[i],
+                ref_timesteps,
+                encoder_hidden_states=clip_image_embeds[i],
+                pose_cond_fea=ref_cond_latents[i],
+                return_dict=False,
+                reference_idx=i,
+            )
+            
+            if self.geo_reference_unet is not None:
+                self.geo_reference_unet(
                     geo_ref_latents[i],
                     ref_timesteps,
                     encoder_hidden_states=clip_image_embeds[i],
@@ -226,259 +222,113 @@ class Net(nn.Module):
                     return_dict=False,
                     reference_idx=i,
                 )
-                
-                if self.geo_reference_unet is not None:
-                    self.geo_reference_unet(
-                        geo_ref_latents[i],
-                        ref_timesteps,
-                        encoder_hidden_states=clip_image_embeds[i],
-                        pose_cond_fea=ref_cond_latents[i],
-                        return_dict=False,
-                        reference_idx=i,
-                    )
 
-            self.reference_control_reader.update(self.reference_control_writer, correspondence=correspondence)
-            
-            if self.geo_reference_unet is not None:
-                self.geo_reference_control_reader.update(self.geo_reference_control_writer, correspondence=correspondence)
+        self.reference_control_reader.update(self.reference_control_writer, correspondence=correspondence)
         
-        if closest_idx is not None:
-            clip_closest_embeds = []
-            for batch_num in range(clip_image_embeds.shape[1]):
-                clip_closest_embeds.append(clip_image_embeds[closest_idx[batch_num], batch_num])
-            tgt_clip_embed = torch.stack(clip_closest_embeds)
-        else:
-            tgt_clip_embed = clip_image_embeds[0]
-
-        if not self.inference:
+        if self.geo_reference_unet is not None:
+            self.geo_reference_control_reader.update(self.geo_reference_control_writer, correspondence=correspondence)
+        
+        clip_closest_embeds = []
+        for batch_num in range(clip_image_embeds.shape[1]):
+            clip_closest_embeds.append(clip_image_embeds[closest_idx[batch_num], batch_num])
+        tgt_clip_embed = torch.stack(clip_closest_embeds)
+                    
+        extra_step_kwargs = prepare_extra_step_kwargs(val_scheduler)
+        
+        input_dict = {
+            "img_pred": noisy_latents,
+            "geo_pred": geo_noisy_latents
+        }
+        
+        warped_image_latents = geo_noisy_latents[:,:4]
+            
+        for n, t in tqdm(enumerate(timesteps)):
+            results_dict = {}
+            
+            noisy_latents = input_dict["img_pred"]
+            latent_model_input = torch.cat([noisy_latents] * 2)
+            latent_model_input = val_scheduler.scale_model_input(
+                    latent_model_input, t
+                )
+                            
+            geo_noisy_latents = input_dict["geo_pred"]
+            
+            # Add warped_image_latent
+            if n != 0:
+                geo_noisy_latents = torch.cat([warped_image_latents, geo_noisy_latents], dim=1)
+            geo_latent_model_input = torch.cat([geo_noisy_latents] * 2)
+            geo_latent_model_input = val_scheduler.scale_model_input(
+                    geo_latent_model_input, t
+                )
+            
+            key = int(t)
+            attn_proc_hooker.cross_attn_maps[key] = []
+            attn_proc_hooker.current_timestep = key
+            
             model_pred = self.denoising_unet(
-                noisy_latents,
-                timesteps,
+                latent_model_input,
+                t,
                 encoder_hidden_states=tgt_clip_embed,
                 pose_cond_fea=tgt_cond_latent.unsqueeze(2), #TODO : temporarily can be disabled for debugging
+                return_dict=False,
                 class_labels=task_emb
-            ).sample
-        
-            self.reference_control_reader.clear()
-            self.reference_control_writer.clear()
-                        
+            )[0]
+            
             for k, tensor_list in attn_proc_hooker.image_attention_dict.items():
                 geo_attn_proc_hooker.image_attention_dict[k] = tensor_list.copy()
-                
-                if self.geometry_unet_2 is not None:
-                    geo_attn_proc_hooker_2.image_attention_dict[k] = tensor_list.copy()
-                
-                if self.geometry_unet_3 is not None:
-                    geo_attn_proc_hooker_3.image_attention_dict[k] = tensor_list.copy()
 
             geo_attn_proc_hooker.layer_list = attn_proc_hooker.layer_list.copy()
-            
-            if self.geometry_unet_2 is not None:
-                geo_attn_proc_hooker_2.layer_list = attn_proc_hooker.layer_list.copy()
-
-            if self.geometry_unet_3 is not None:
-                geo_attn_proc_hooker_3.layer_list = attn_proc_hooker.layer_list.copy()
-                                    
+                        
             geo_model_pred = self.geometry_unet(
-                geo_noisy_latents,
-                timesteps,
+                geo_latent_model_input,
+                t,
                 encoder_hidden_states=tgt_clip_embed,
                 pose_cond_fea=tgt_cond_latent.unsqueeze(2), #TODO : temporarily can be disabled for debugging
+                return_dict=False,
                 class_labels=task_emb
-            ).sample
+            )[0]
+            
+            attn_proc_hooker.clear()
+            geo_attn_proc_hooker.clear()
                     
             results_dict = {
                 "img_pred": model_pred,
                 "geo_pred": geo_model_pred
             }
             
-            if self.geometry_unet_2 is not None:
-                geo_model_pred_2 = self.geometry_unet_2(
-                    geo_noisy_latents_2,
-                    timesteps,
-                    encoder_hidden_states=tgt_clip_embed,
-                    pose_cond_fea=tgt_cond_latent.unsqueeze(2), #TODO : temporarily can be disabled for debugging
-                    class_labels=task_emb
-                ).sample
-
-                geo_attn_proc_hooker_2.clear()
+            for key in results_dict.keys():
+                noise_pred = results_dict[key]
+                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + self.cfg_guidance_scale * (
+                    noise_pred_text - noise_pred_uncond
+                )
                 
-                results_dict["geo_pred_2"] = geo_model_pred_2
-
-            if self.geometry_unet_3 is not None:
-                geo_model_pred_3 = self.geometry_unet_3(
-                    geo_noisy_latents_3,
-                    timesteps,
-                    encoder_hidden_states=tgt_clip_embed,
-                    pose_cond_fea=tgt_cond_latent.unsqueeze(2), #TODO : temporarily can be disabled for debugging
-                    class_labels=task_emb
-                ).sample
-
-                geo_attn_proc_hooker_3.clear()
-                
-                results_dict["geo_pred_3"] = geo_model_pred_3
-                
-            if self.geo_reference_unet is not None:
-                self.geo_reference_control_reader.clear()
-                self.geo_reference_control_writer.clear()
-                    
-        else: # Inference code
-            extra_step_kwargs = prepare_extra_step_kwargs(val_scheduler)
-            
-            input_dict = {
-                "img_pred": noisy_latents,
-                "geo_pred": geo_noisy_latents,
-                "geo_pred_2": geo_noisy_latents_2 if self.geometry_unet_2 is not None else None,
-                "geo_pred_3": geo_noisy_latents_3 if self.geometry_unet_3 is not None else None
-            }
-            
-            warped_image_latents = geo_noisy_latents[:,:4]
-             
-            for n, t in tqdm(enumerate(timesteps)):
-                results_dict = {}
-                
-                noisy_latents = input_dict["img_pred"]
-                latent_model_input = torch.cat([noisy_latents] * 2)
-                latent_model_input = val_scheduler.scale_model_input(
-                        latent_model_input, t
-                    )
-                                
-                geo_noisy_latents = input_dict["geo_pred"]
-                
-                # Add warped_image_latent
-                if n != 0:
-                    geo_noisy_latents = torch.cat([warped_image_latents, geo_noisy_latents], dim=1)
-                geo_latent_model_input = torch.cat([geo_noisy_latents] * 2)
-                geo_latent_model_input = val_scheduler.scale_model_input(
-                        geo_latent_model_input, t
-                    )
-                
-                if self.geometry_unet_2 is not None:
-                    geo_noisy_latents_2 = input_dict["geo_pred_2"]
-                    if n != 0:
-                        geo_noisy_latents_2 = torch.cat([warped_image_latents, geo_noisy_latents_2], dim=1)
-                    geo_latent_model_input_2 = torch.cat([geo_noisy_latents_2] * 2)
-                    geo_latent_model_input_2 = val_scheduler.scale_model_input(
-                            geo_latent_model_input_2, t
-                        )
-
-                if self.geometry_unet_3 is not None:
-                    geo_noisy_latents_3 = input_dict["geo_pred_3"]
-                    if n != 0:
-                        geo_noisy_latents_3 = torch.cat([warped_image_latents, geo_noisy_latents_3], dim=1)
-                    geo_latent_model_input_3 = torch.cat([geo_noisy_latents_3] * 2)
-                    geo_latent_model_input_3 = val_scheduler.scale_model_input(
-                            geo_latent_model_input_3, t
-                        )
-                
-                key = int(t)
-                attn_proc_hooker.cross_attn_maps[key] = []
-                attn_proc_hooker.current_timestep = key
-                
-                model_pred = self.denoising_unet(
-                    latent_model_input,
-                    t,
-                    encoder_hidden_states=tgt_clip_embed,
-                    pose_cond_fea=tgt_cond_latent.unsqueeze(2), #TODO : temporarily can be disabled for debugging
-                    return_dict=False,
-                    class_labels=task_emb
-                )[0]
-                
-                for k, tensor_list in attn_proc_hooker.image_attention_dict.items():
-                    geo_attn_proc_hooker.image_attention_dict[k] = tensor_list.copy()
-                    
-                    if self.geometry_unet_2 is not None:
-                        geo_attn_proc_hooker_2.image_attention_dict[k] = tensor_list.copy()
-                    
-                    if self.geometry_unet_3 is not None:
-                        geo_attn_proc_hooker_3.image_attention_dict[k] = tensor_list.copy()
-
-                geo_attn_proc_hooker.layer_list = attn_proc_hooker.layer_list.copy()
-                
-                if self.geometry_unet_2 is not None:
-                    geo_attn_proc_hooker_2.layer_list = attn_proc_hooker.layer_list.copy()
-
-                if self.geometry_unet_3 is not None:
-                    geo_attn_proc_hooker_3.layer_list = attn_proc_hooker.layer_list.copy()
-                            
-                geo_model_pred = self.geometry_unet(
-                    geo_latent_model_input,
-                    t,
-                    encoder_hidden_states=tgt_clip_embed,
-                    pose_cond_fea=tgt_cond_latent.unsqueeze(2), #TODO : temporarily can be disabled for debugging
-                    return_dict=False,
-                    class_labels=task_emb
-                )[0]
-                
-                attn_proc_hooker.clear()
-                geo_attn_proc_hooker.clear()
-                        
-                results_dict = {
-                    "img_pred": model_pred,
-                    "geo_pred": geo_model_pred
-                }
-                
-                if self.geometry_unet_2 is not None:
-                    geo_model_pred_2 = self.geometry_unet_2(
-                        geo_latent_model_input_2,
-                        t,
-                        encoder_hidden_states=tgt_clip_embed,
-                        pose_cond_fea=tgt_cond_latent.unsqueeze(2), #TODO : temporarily can be disabled for debugging
-                        return_dict=False,
-                        class_labels=task_emb
-                    )[0]
-
-                    geo_attn_proc_hooker_2.clear()
-                    
-                    results_dict["geo_pred_2"] = geo_model_pred_2
-
-                if self.geometry_unet_3 is not None:
-                    geo_model_pred_3 = self.geometry_unet_3(
-                        geo_latent_model_input_3,
-                        t,
-                        encoder_hidden_states=tgt_clip_embed,
-                        pose_cond_fea=tgt_cond_latent.unsqueeze(2), #TODO : temporarily can be disabled for debugging
-                        return_dict=False,
-                        class_labels=task_emb
-                    )[0]
-
-                    geo_attn_proc_hooker_3.clear()
-                    
-                    results_dict["geo_pred_3"] = geo_model_pred_3
-                
-                for key in results_dict.keys():
-                    noise_pred = results_dict[key]
-                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + self.cfg_guidance_scale * (
-                        noise_pred_text - noise_pred_uncond
-                    )
-                    
-                    if key == "img_pred":
-                        prev = input_dict[key]
+                if key == "img_pred":
+                    prev = input_dict[key]
+                else:
+                    if n == 0:
+                        prev = input_dict[key][:, 4:]
                     else:
-                        if n == 0:
-                            prev = input_dict[key][:, 4:]
-                        else:
-                            prev = input_dict[key]
-                        
-                    latents_noisy = val_scheduler.step(
-                        noise_pred, t, prev, **extra_step_kwargs,
-                        return_dict=False
-                    )[0]
+                        prev = input_dict[key]
                     
-                    input_dict[key] = latents_noisy
-            
-            fin_results_dict = {}
-            for key, latent in input_dict.items():
-                if latent is not None:
-                    latent = latent.squeeze(2)
-                    synthesized = decode_latents(vae, latent)
-                    fin_results_dict[key] = synthesized
-            
-            results_dict = fin_results_dict
+                latents_noisy = val_scheduler.step(
+                    noise_pred, t, prev, **extra_step_kwargs,
+                    return_dict=False
+                )[0]
+                
+                input_dict[key] = latents_noisy
+        
+        fin_results_dict = {}
+        for key, latent in input_dict.items():
+            if latent is not None:
+                latent = latent.squeeze(2)
+                synthesized = decode_latents(vae, latent)
+                fin_results_dict[key] = synthesized
+        
+        results_dict = fin_results_dict
 
-            self.reference_control_reader.clear()
-            self.reference_control_writer.clear()
+        self.reference_control_reader.clear()
+        self.reference_control_writer.clear()
                         
         return results_dict
 
@@ -696,14 +546,7 @@ def prepare_duster_embedding(
 
             combined_results, tgt_depth = reprojector(pts_locs, pts_feat, camera_tgt, device=device, coord_channel=coord_channel, get_depth=depth_conditioning)
             proj_results = combined_results[...,:3]
-            
-            # predict mesh normals
-            if current_dataset == "realestate" and nomesh_normal:
-                variance_filter = filter_high_variance_regions(tgt_depth)
-                normal = convert_depth_to_normal(tgt_depth)
-                
-                mesh_normals = (variance_filter * normal).permute(0,2,3,1)
-                
+
             if normal_mask is not None and current_dataset != "realestate":
                 proj_results = normal_mask * proj_results
                 tgt_depth = normal_mask.permute(0,3,1,2) * tgt_depth
@@ -1275,21 +1118,7 @@ def main(cfg):
         fusion_blocks="full",
         feature_fusion_type=cfg.feature_fusion_type if hasattr(cfg, "feature_fusion_type") else "attention_masking",
     )
-    
-    net_variables = [
-        reference_unet,
-        denoising_unet,
-        None,
-        None, # Second geometry network
-        None, # Third geometry network
-        None, # Geo reference unet
-        pose_guider,
-        reference_control_writer,
-        reference_control_reader,
-    ]
-    
-    net_variables[2] = geometry_unet
-    
+
     geo_reference_control_writer = ReferenceAttentionControl(
         geo_reference_unet,
         do_classifier_free_guidance=False,
@@ -1305,9 +1134,17 @@ def main(cfg):
         feature_fusion_type=cfg.feature_fusion_type if hasattr(cfg, "feature_fusion_type") else "attention_masking",
     )
     
-    net_variables[5] = geo_reference_unet
-    net_variables += [geo_reference_control_writer, geo_reference_control_reader]    
-    
+    net_variables = [
+        reference_unet,
+        denoising_unet,
+        geometry_unet,
+        geo_reference_unet,
+        pose_guider,
+        reference_control_writer,
+        reference_control_reader,
+        geo_reference_control_writer,
+        geo_reference_control_reader
+    ]    
     net = Net(
         *net_variables
     )
@@ -1384,125 +1221,7 @@ def main(cfg):
         world_size = int(os.environ["WORLD_SIZE"])
     else:
         world_size = 1
-
-    # Dataloader sections
-    directory = cfg.data_directory            
-
-    urls = []
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith(".tar"):
-                urls.append(os.path.join(root, file))
-    
-    shardshuffle=True
-    resampled=True
-    dataset_length = 2000
-    epoch = 10000
-    sampling_views = cfg.sampling_views
-    uniform_sampling = True
-    postprocess_fn_1 = partial(postprocess_vggt, num_viewpoints=num_ref_viewpoints, interpolate_only = cfg.interpolate_only, view_range=cfg.view_range, uniform_sampling= uniform_sampling, sampling_views = sampling_views)
-
-    train_dataset = (
-            wds.WebDataset(urls, 
-                            resampled=resampled,
-                            shardshuffle=shardshuffle, 
-                            nodesplitter=wds.split_by_node,
-                            workersplitter=wds.split_by_worker,
-                            handler=wds.ignore_and_continue)
-            .decode("pil")
-            .map(postprocess_fn_1)
-            .with_length(dataset_length)
-    )
-
-    train_dataloader = DataLoader(train_dataset, num_workers=world_size, batch_size=cfg.dataset.train_bs, persistent_workers=True)
-    
-    if cfg.inference:
-        (
-            net,
-            train_dataloader,
-        ) = accelerator.prepare(
-            net,
-            train_dataloader,
-        )
         
-    else:
-        (
-            net,
-            optimizer,
-            train_dataloader,
-            lr_scheduler,
-        ) = accelerator.prepare(
-            net,
-            optimizer,
-            train_dataloader,
-            lr_scheduler,
-        )
-
-    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / cfg.solver.gradient_accumulation_steps
-    )
-    # Afterwards we recalculate our number of training epochs
-    num_train_epochs = math.ceil(
-        cfg.solver.max_train_steps / num_update_steps_per_epoch
-    )
-
-    # We need to initialize the trackers we use, and also store our configuration.
-    # The trackers initializes automatically on the main process.
-    if accelerator.is_main_process:
-        run_time = datetime.now().strftime("%Y%m%d-%H%M")
-        accelerator.init_trackers(
-            project_name="animate-nvs",
-            config=OmegaConf.to_container(cfg),
-        )
-
-    # Train
-    total_batch_size = (
-        cfg.dataset.train_bs
-        * accelerator.num_processes
-        * cfg.solver.gradient_accumulation_steps
-    )
-
-    logger.info("***** Running training *****")
-    logger.info(f"  Num examples = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {num_train_epochs}")
-    logger.info(f"  Instantaneous batch size per device = {cfg.dataset.train_bs}")
-    logger.info(
-        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
-    )
-    logger.info(
-        f"  Gradient Accumulation steps = {cfg.solver.gradient_accumulation_steps}"
-    )
-    logger.info(f"  Total optimization steps = {cfg.solver.max_train_steps}")
-    global_step = 0
-    first_epoch = 0
-
-    # Potentially load in the weights and states from a previous save
-    if cfg.resume_from_checkpoint:
-        if cfg.resume_from_checkpoint != "latest":
-            resume_dir = cfg.resume_from_checkpoint
-        else:
-            raise ValueError("Do not support latest checkpoint currently")
-            resume_dir = save_dir
-        # Get the most recent checkpoint
-        dirs = os.listdir(resume_dir)
-        dirs = [d for d in dirs if d.startswith("checkpoint")]
-        dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-        path = dirs[-1]
-        accelerator.load_state(os.path.join(resume_dir, path))
-        accelerator.print(f"Resuming from checkpoint {path}")
-        global_step = int(path.split("-")[1])
-
-        first_epoch = global_step // num_update_steps_per_epoch
-        resume_step = global_step % num_update_steps_per_epoch
-
-    # Only show the progress bar once on each machine.
-    progress_bar = tqdm(
-        range(global_step, cfg.solver.max_train_steps),
-        disable=not accelerator.is_local_main_process,
-    )
-    progress_bar.set_description("Steps")
-    
     embedder, out_dim = get_embedder(2)
     
     if cfg.geo_first:
@@ -1532,24 +1251,13 @@ def main(cfg):
             ptsmap_min = torch.tensor([-0.1798, -0.2254,  0.0593]).to(image_enc.device)
             ptsmap_max = torch.tensor([0.1899, 0.0836, 0.7480]).to(image_enc.device)
             
-        pts_norm_func = PointmapNormalizer(ptsmap_min, ptsmap_max, k=0.9)
+        pts_norm_func = PointmapNormalizer(ptsmap_min, ptsmap_max, k=0.9
         
-    if cfg.inference:
-        # with torch.no_grad():
-        infer_data = "co3d_known"
-        # batch_list = batchify_known(infer_data, num_viewpoints=num_ref_viewpoints)
-        # batch = {k: (v.to(device) if torch.is_tensor(v) else v) for k, v in batch.items()
-        
-    device = image_enc.device
-    
-    point_list = []
-    
-    if cfg.infer_setting == "realestate_eval" or cfg.infer_setting == "dtu_eval" :
-        eval_batchify = EvalBatch(device)
+    device = image_enc.device    
+    eval_batchify = EvalBatch(device)
         
     now = strftime("%m_%d_%H_%M_%S", gmtime())
     to_pil = ToPILImage() 
-
     ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
     lpips_fn = lpips.LPIPS(net='alex').to(device)
     
@@ -1730,7 +1438,6 @@ def main(cfg):
                             else:
                                 current_dataset = "co3d"
                     
-                                
                         if cfg.view_select:
                             search = True
                                                         

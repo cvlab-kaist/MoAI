@@ -17,7 +17,7 @@ from jaxtyping import Float
 from extern.ZoeDepth.zoedepth.utils.misc import colorize
 
 from genwarp import GenWarp
-from genwarp.ops import (
+from main.ops import (
     camera_lookat, get_projection_matrix, get_viewport_matrix
 )
 
