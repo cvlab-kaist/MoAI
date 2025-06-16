@@ -21,9 +21,9 @@ This repository is an official implementation for the paper "[Aligned Novel View
 
 ![Framework](https://github.com/cvlab-kaist/MoAI/blob/main/MoAI/assets/architecture.png)
 
-## Examples
+## Overview and Examples
 
-Our model can handle images from various domains including indoor/outdoor scenes, and even illustrations with challenging camera viewpoint changes.
+Our model can generate novel view image and geometry in extrapolative, far-away camera viewpoints from arbitrary number of unposed reference images. This is enabled by our cross-**Mo**dal **A**ttention **I**istillation (**MoAI**), in which the spatial attention maps of image generation pipeline is instilled into the geometry generation pipeline during training and inference for synergyistic effects. 
 
 You can find examples on our [project page](https://cvlab-kaist.github.io/MoAI/) and on our [paper](https://arxiv.org/abs/2506.11924). 
 
