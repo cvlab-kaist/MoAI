@@ -4,7 +4,7 @@
 [![Github](https://img.shields.io/badge/Github-Repo-orange?logo=github)](https://github.com/cvlab-kaist/MoAI) &nbsp; 
 <!-- [![Spaces](https://img.shields.io/badge/Spaces-Demo-yellow?logo=huggingface)]() &nbsp;  -->
 <!-- [![Models](https://img.shields.io/badge/Models-checkpoints-blue?logo=huggingface)]() &nbsp;  -->
-<!-- [![arXiv](https://img.shields.io/badge/arXiv-2405.17251-red?logo=arxiv)](https://arxiv.org/abs/2405.17251) -->
+[![arXiv](https://img.shields.io/badge/arXiv-2506.11924-red?logo=arxiv)](https://arxiv.org/abs/2506.11924)
 
 [Introduction](#introduction)
 | [Demo](#demo)
@@ -17,7 +17,7 @@
 
 ## Introduction
 
-This repository is an official implementation for the paper "[Aligned Novel View Image and Geometry Synthesis via Cross-modal Attention Instillation](https://cvlab-kaist.github.io/MoAI/)". We introduce a diffusion-based framework that performs aligned novel view image and geometry generation via a warping‐and‐inpainting methodology. For detailed information, please refer to the [paper](https://arxiv.org/abs/2405.17251).
+This repository is an official implementation for the paper "[Aligned Novel View Image and Geometry Synthesis via Cross-modal Attention Instillation](https://cvlab-kaist.github.io/MoAI/)". We introduce a diffusion-based framework that performs aligned novel view image and geometry generation via a warping‐and‐inpainting methodology. For detailed information, please refer to the [paper](https://arxiv.org/abs/2506.11924).
 
 ![Framework](https://github.com/cvlab-kaist/MoAI/blob/main/MoAI/assets/architecture.png)
 
@@ -25,7 +25,7 @@ This repository is an official implementation for the paper "[Aligned Novel View
 
 Our model can handle images from various domains including indoor/outdoor scenes, and even illustrations with challenging camera viewpoint changes.
 
-You can find examples on our [project page](https://cvlab-kaist.github.io/MoAI/) and on our [paper](https://arxiv.org/abs/2405.17251). 
+You can find examples on our [project page](https://cvlab-kaist.github.io/MoAI/) and on our [paper](https://arxiv.org/abs/2506.11924). 
 
 ![Examples](https://github.com/cvlab-kaist/MoAI/blob/main/MoAI/assets/Qual_image.png)
 
@@ -171,10 +171,10 @@ rel_view_mtx = (
   title={Aligned Novel View Image and Geometry Synthesis via Cross-modal Attention Instillation}, 
   author={Min-Seop Kwak and Junho Kim and Sangdoo Yun and Dongyoon Han and Taekyoung Kim and Seungryong Kim and Jin-Hwa Kim},
   year={2025},
-  eprint={2506.UNDECIDED},
+  eprint={2506.11924},
   archivePrefix={arXiv},
   primaryClass={cs.CV},
-  url={https://arxiv.org/abs/2506.UNDECIDED}, 
+  url={https://arxiv.org/abs/2506.11924}, 
 }
 ```
 
