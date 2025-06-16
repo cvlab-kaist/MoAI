@@ -29,6 +29,21 @@ from jaxtyping import Float, Int64
 class IndexEntry:
     context: tuple[int, ...]
     target: tuple[int, ...]
+    
+def pil_to_tensor_batch(pil_images):
+    """
+    Convert a list of PIL.Image to a 4D tensor batch of shape (B, C, H, W).
+    
+    Args:
+        pil_images (List[PIL.Image.Image]): List of PIL images (mode "RGB").
+
+    Returns:
+        torch.Tensor: A tensor of shape (B, 3, H, W) with pixel values in [0,1].
+    """
+    to_tensor = ToTensor()  # Converts PIL Image to (C, H, W) tensor in [0,1]
+    tensors = [to_tensor(img) for img in pil_images]
+    batch = torch.stack(tensors, dim=0)  # Stack into (B, C, H, W)
+    return batch
 
 class EvalBatch():
     def __init__(
@@ -40,21 +55,6 @@ class EvalBatch():
         self.device = device
         self.dtype = torch.bfloat16  # or torch.float16
         
-        real_root = "/mnt/data2/minseop/re10k/test_partial"
-        self.example_files = sorted(Path(real_root).rglob("*.torch"))
-
-        self.chunk_overview = []
-
-        for file_path in self.example_files:
-            examples = torch.load(file_path)
-            self.chunk_overview.append(len(examples))
-            
-        self.crop_transform = tf.Compose([
-            tf.CenterCrop(360),
-            tf.Resize((512, 512)),   # Resize to a consistent size (adjust as needed)
-            tf.ToTensor()             # Convert to tensor and normalize to [0, 1]
-        ])
-        
         self.model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
         
         self.crop_transform = tf.Compose([
@@ -62,30 +62,7 @@ class EvalBatch():
             tf.CenterCrop(512),  # Center crop to 512x512
             tf.ToTensor()    
         ])
-        
-        index_path = Path("/mnt/data1/minseop/multiview-gen/evaluation_index_re10k.json")
-        
-        dacite_config = Config(cast=[tuple])
-        with index_path.open("r") as f:
-            self.index = {
-                k: None if v is None else from_dict(IndexEntry, v, dacite_config)
-                for k, v in json.load(f).items()
-            }
-        
-        
-    def convert_images(
-        self,
-        images,
-    ):
-        to_tensor = tf.ToTensor()
-        torch_images = []
-            
-        for image in images:
-            image = Image.open(BytesIO(image.numpy().tobytes()))
-            torch_images.append(to_tensor(image))
-            
-        return torch.stack(torch_images)
-    
+
     
     def transform_pts(self, array):
         """
@@ -126,70 +103,23 @@ class EvalBatch():
 
         # Center crop the image
         array = array_resized[...,top:bottom,left:right]
-
         return array
-        
-        
-    def realestate_eval(self, num_viewpoints = 2, setting = "extrapolate"):
 
-        self.example_num += 1
-        
-        if self.chunk_overview[self.chunk_num] == self.example_num:
-            self.chunk_num += 1
-            self.example_num = 0
-            
-        example = torch.load(self.example_files[self.chunk_num])[self.example_num]
-
-        key = example["key"]
-        num_imgs = len(example["images"])
-        
-        if setting == "interpolate":
-            entry = self.index.get(key)
-            loop = True
-            while loop:
-                if entry is None:
-                    self.example_num += 1
-                    if self.chunk_overview[self.chunk_num] == self.example_num:
-                        self.chunk_num += 1
-                        self.example_num = 0
-                    example = torch.load(self.example_files[self.chunk_num])[self.example_num]
-                    key = example["key"]
-                    num_imgs = len(example["images"])
-                    entry = self.index.get(key)
-                    
-                else:
-                    loop = False
-                    context_indices = torch.tensor(entry.context, dtype=torch.int64, device=self.device)
-                    target_indices = torch.tensor(entry.target, dtype=torch.int64, device=self.device)
-        
-        elif setting == "extrapolate":
-            entry = self.index.get(key)
-            loop = True
-
-            while loop:
-                if entry is None:
-                    self.example_num += 1
-                    if self.chunk_overview[self.chunk_num] == self.example_num:
-                        self.chunk_num += 1
-                        self.example_num = 0
-                    example = torch.load(self.example_files[self.chunk_num])[self.example_num]
-                    key = example["key"]
-                    num_imgs = len(example["images"])
-                    entry = self.index.get(key)
+    def images_eval(self, image_dir = "/path/to/your/image_directory"):
                 
-                else:
-                    loop = False
-                    context_indices = torch.tensor([int(num_imgs * 2/3), int(num_imgs * 4/5), int(num_imgs * 1/2), int(num_imgs * 3/5)])
-                    target_indices = torch.tensor([int(num_imgs * 1/3), int(num_imgs * 2/5), int(num_imgs * 1/4)])
-        else:
-            raise ValueError("Invalid setting. Choose 'interpolate' or 'extrapolate'.")
-
-        idx = torch.cat((context_indices, target_indices)).tolist()
+        # find all common image files, sorted by name
+        image_paths = sorted(
+            glob.glob(os.path.join(image_dir, "*"))
+        )
+        # filter out non-image extensions
+        image_paths = [
+            p for p in image_paths
+            if p.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".tiff"))
+        ]
+        # open each file and convert to RGB PIL.Image
+        pil_images = [Image.open(p).convert("RGB") for p in image_paths]
         
-        imagelist = [example['images'][i] for i in idx]
-                
-        images = self.convert_images(imagelist)
-        images_vggt = F.interpolate(images, size=(294, 518), mode="bilinear", align_corners=False)
+        images = pil_to_tensor_batch(pil_images)
         
         with torch.no_grad():
             with torch.cuda.amp.autocast(dtype=self.dtype):
@@ -210,155 +140,9 @@ class EvalBatch():
             pts = self.transform_pts(point_map[0])
             images = self.transform_pts(images[0].permute(0,2,3,1))
             
-            # import pdb; pdb.set_trace()
-            
-            #jiho: hardcoding: used_idx selected in train_vggt_inference.py, ctx= 0,1 , tgt = 4,5,6
-            if setting == "extrapolate":
-                used_idx = [idx[0], idx[1], idx[4], idx[5], idx[6]]
-            elif setting == "interpolate":
-                used_idx = [idx[0], idx[1], idx[2], idx[3], idx[4]]
-            name = key + '_idx_' + '_'.join(map(str, used_idx))
-            output = dict(image = images[None,...].to(self.device), points = pts[None,...].to(self.device), intrinsic = intrinsic.to(self.device), extrinsic = extrinsic.to(self.device), conf=None, dataset=[1], 
-                          instance_name = name)
+            output = dict(image = images[None,...].to(self.device), points = pts[None,...].to(self.device), intrinsic = intrinsic.to(self.device), extrinsic = extrinsic.to(self.device), conf=None, dataset=[1])
         
         return output
-
-    def dtu_eval(self, num_src = 2, num_target = 1, setting = "extrapolate"): # extrapolating settings
-        idxpair_per_scene = 4 # mvsplat idx
-        from einops import repeat, rearrange # should move to top
-        ### # Should move to init ####
-        root ="/mnt/data1/jiho/datasets/dtu_mvsplat/test"
-        self.example_files = sorted(Path(root).rglob("*.torch"))
-        self.chunk_overview = []
-        for file_path in self.example_files:
-            examples = torch.load(file_path)
-            self.chunk_overview.append(len(examples))
-        ##############################
-
-        
-        example = torch.load(self.example_files[self.chunk_num])[self.example_num]
-        if not hasattr(self, "idxpair_step"):
-            self.idxpair_step = -1
-            
-        
-        self.idxpair_step += 1
-        
-        if self.idxpair_step == idxpair_per_scene:
-            self.idxpair_step = 0
-            self.example_num += 1
-            if self.chunk_overview[self.chunk_num] == self.example_num:
-                self.chunk_num += 1
-                self.example_num = 0
-            
-        key = example["key"]
-        # Index Selection
-        
-        # 1) heuristic
-        # num_imgs = len(example["images"])
-        # context_indices = torch.tensor([int(num_imgs * 2/3), int(num_imgs * 4/5)])
-        # target_indices = torch.tensor([int(num_imgs * 1/3), int(num_imgs * 2/5), int(num_imgs * 1/4)])
-        # idx = torch.cat((context_indices, target_indices)).tolist()
-        
-        # 2) mvsplat processed
-        idx_path= '/mnt/data1/jiho/datasets/dtu_mvsplat/assets'
-        idx_path = os.path.join(idx_path, f"nctx{num_src + num_target - 1}.json") # nctx 1 ~ 9, default_target_num = 1
-        with open(idx_path, "r") as f:
-            idx_full = json.load(f)
-        idx_example_keys = [k  for k in idx_full.keys() if k.startswith(key)]
-        # idx_example_key = np.random.choice(idx_example_keys).item()
-        idx_example_key = idx_example_keys[self.idxpair_step]
-        idx_selected = idx_full[idx_example_key]
-        idx_selected = idx_selected['context'] + idx_selected['target'] # merge, we will select target from below
-        
-        if setting == "interpolate":
-            idx = idx_selected
-        elif setting == "extrapolate":
-            # target selection: fartherest camera
-            def convert_poses(poses):
-                b, _ = poses.shape
-                # Convert the intrinsics to a 3x3 normalized K matrix.
-                intrinsics = torch.eye(3, dtype=torch.float32)
-                intrinsics = repeat(intrinsics, "h w -> b h w", b=b).clone()
-                fx, fy, cx, cy = poses[:, :4].T
-                intrinsics[:, 0, 0] = fx
-                intrinsics[:, 1, 1] = fy
-                intrinsics[:, 0, 2] = cx
-                intrinsics[:, 1, 2] = cy
-
-                # Convert the extrinsics to a 4x4 OpenCV-style W2C matrix.
-                w2c = repeat(torch.eye(4, dtype=torch.float32), "h w -> b h w", b=b).clone()
-                w2c[:, :3] = rearrange(poses[:, 6:], "b (h w) -> b h w", h=3, w=4)
-                return w2c.inverse(), intrinsics
-            extri, _ = convert_poses(example["cameras"])
-            extri = extri[idx_selected]
-            T = extri[:, :3, -1]
-            diff = T.unsqueeze(1) - T.unsqueeze(0)  # Shape: (N, N, 3)
-            dist = torch.norm(diff, dim=2).mean(dim=1) 
-            idx_target = torch.topk(dist, num_target).indices.tolist()
-            idx_target = [idx_selected[i] for i in idx_target]
-            idx_source = list(set(idx_selected) - set(idx_target))            
-            idx = idx_source + idx_target
-        else:
-            raise ValueError("Invalid setting. Choose 'interpolate' or 'extrapolate'.")
-
-        imagelist = [example['images'][i] for i in idx]
-                
-        images = self.convert_images(imagelist)
-        images_vggt = F.interpolate(images, size=(294, 518), mode="bilinear", align_corners=False)
-        
-        with torch.no_grad():
-            with torch.cuda.amp.autocast(dtype=self.dtype):
-                # Time aggregator call (including adding the batch dimension)
-                images = images[None]  # add batch dimension
-                images_vggt = images_vggt[None]  # add batch dimension
-                aggregated_tokens_list, ps_idx = self.model.aggregator(images_vggt.to(self.device))
-            
-            # Time the camera head prediction
-            pose_enc = self.model.camera_head(aggregated_tokens_list)[-1]
-            
-            # Time the conversion from pose encoding to extrinsic/intrinsic matrices
-            extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, images_vggt.shape[-2:])
-            
-            # Time the point head prediction
-            point_map, point_conf = self.model.point_head(aggregated_tokens_list, images_vggt, ps_idx)
-        
-            pts = self.transform_pts(point_map[0])
-            images = self.transform_pts(images[0].permute(0,2,3,1))
-            
-            name = idx_example_key + '_idx_' + '_'.join(map(str, idx))
-            output = dict(image = images[None,...].to(self.device), points = pts[None,...].to(self.device), intrinsic = intrinsic.to(self.device), extrinsic = extrinsic.to(self.device), conf=None, dataset=[1],
-                          instance_name = name)
-            print("name : ", name)
-        return output
-
-def revisit_eval(scene_dir):
-    
-    batch_dir = os.path.join(scene_dir, "batch_info.pt")
-    info_dir =  os.path.join(scene_dir, "run_info.json")
-    
-    with open(info_dir, "r") as f:
-        info_data = json.load(f)
-
-    src_idx = info_data["source_idx"]
-    target_idx_list = info_data["target_idx"]
-        
-    batch = torch.load(batch_dir)
-    
-    keypoints_dict = {}
-    
-    for current_path, dirs, _ in os.walk(scene_dir):
-        dirs = sorted(dirs)
-        for d in dirs:
-            tgt_idx = d.split("_")[-1]  
-            keypoint_dir = os.path.join(scene_dir, d, "keypoints.json")
-            
-            with open(keypoint_dir, "r") as f:
-                keypoint_info = json.load(f)
-            
-            keypoints_dict[tgt_idx] = keypoint_info["keypoints"]
-            
-    
-    return batch, src_idx, target_idx_list, keypoints_dict
 
 
 def overlay_grid_and_save(img_tensor: torch.Tensor, spacing=64, out_path="grid_overlay.png"):
@@ -420,9 +204,7 @@ def overlay_grid_and_save(img_tensor: torch.Tensor, spacing=64, out_path="grid_o
 
     plt.tight_layout()
     plt.savefig(out_path, dpi=300)
-    plt.close(fig)
-
-                    
+    plt.close(fig)     
 
 def make_translation_matrix(dx, dy, dz, device):
     T = torch.eye(4)
@@ -479,3 +261,188 @@ def camera_search(cam, cmd, device):
         print("Unknown command.")
 
     return cam[None,...]
+
+ 
+@torch.no_grad()
+def mari_embedding_prep(cfg, images, correspondence, ref_camera, tgt_camera, src_idx, batch_size, device, full_condition=False):
+    mesh_pts = None
+    mesh_depth = None
+    mesh_normals = None
+    mesh_ref_normals = None
+    mesh_normal_mask = None
+    norm_depth = None
+    confidence_map = None
+    plucker = None 
+    tgt_depth = None
+    
+    origins = ref_camera['pose'][:,:,:3,-1]
+    tgt_origins = tgt_camera['pose'][:,:3,-1]
+    
+    dist = torch.linalg.norm(correspondence["ref"] - origins[...,None,None,:],axis=-1)[...,None]
+    norm_depth = dist
+    
+    tgt_dist = torch.linalg.norm(correspondence["tgt"] - tgt_origins[...,None,None,:],axis=-1)[...,None]
+    tgt_depth = tgt_dist
+                                
+    ref_depth = depth_normalize(cfg, norm_depth)
+    tgt_depth_norm = depth_normalize(cfg, tgt_depth)
+    
+    clip = True
+                                
+    if clip:
+        min_val = -1.0
+        max_val = 1.0
+        ref_depth = torch.clip(ref_depth, min=min_val, max=max_val).reshape(-1,512,512,1).permute(0,3,1,2).repeat(1,3,1,1)
+        tgt_depth_norm = torch.clip(tgt_depth_norm, min=min_val, max=max_val).permute(0,3,1,2).repeat(1,3,1,1)
+    
+    # import pdb; pdb.set_trace()
+
+    # if cfg.use_mesh:
+    if cfg.downsample:
+        downsample_by = cfg.downsample_by
+        start = downsample_by // 2
+        interval = downsample_by
+        if not full_condition:
+            points = correspondence['ref'][:,:,start::interval,start::interval,:].permute(0,1,4,2,3).float()    
+        else:
+            ref_points = correspondence['ref'][:,:,start::interval,start::interval,:].permute(0,1,4,2,3).float() 
+            tgt_points = correspondence['tgt'][:,start::interval,start::interval,:].unsqueeze(1).permute(0,1,4,2,3).float() 
+            
+            points = torch.cat((ref_points, tgt_points), dim=1)
+
+        images_ref = torch.cat(images["ref"], dim=1)
+        rgb = images_ref[:,:,:,start::interval,start::interval]
+        if full_condition:
+            tgt_rgb = images["tgt"][:,:,start::interval,start::interval].unsqueeze(1)
+            rgb = torch.cat((rgb, tgt_rgb), dim=1)
+        side_length = 512 // downsample_by
+
+    # else:
+    #     points = batch['points'].reshape(batch_size, -1, 3).permute(0,2,1).float()
+    #     rgb = batch['image'].permute(0,1,3,4,2).reshape(batch_size, -1, 3).permute(0,2,1)
+    #     side_length = 512 // downsample_by
+
+    batch_pts = points
+    batch_colors = rgb
+    orig_length = torch.tensor(512).to(device)
+
+    mesh_pts = []
+    mesh_normals = []
+    mesh_depth = []
+    mesh_ref_normal_list = []
+    mesh_normal_mask = []
+
+    for i, (pts_list, color_list) in enumerate(zip(batch_pts, batch_colors)):
+        extrins = tgt_camera["pose"][i].detach().cpu().numpy()
+        focal_length = tgt_camera["focals"][i]
+
+        vert = []
+        fc = []
+        col = []
+
+        vert_stack = 0
+
+        for k, (pts, color) in enumerate(zip(pts_list, color_list)):
+            
+            if not full_condition:
+                vertices, faces, colors = features_to_world_space_mesh(
+                    world_space_points=pts.detach(),
+                    colors=color.detach(),
+                    edge_threshold=0.48,
+                    H = side_length
+                )
+
+                vert.append(vertices)
+                fc.append(faces + vert_stack)
+                col.append(colors)
+
+                vert_num = vertices.shape[1]
+                vert_stack += vert_num
+
+            else:
+                if k != (pts_list.shape[0] - 1):
+                    vertices, faces, colors = features_to_world_space_mesh(
+                        world_space_points=pts.detach(),
+                        colors=color.detach(),
+                        edge_threshold=0.48,
+                        H = side_length
+                    )
+
+                    vert.append(vertices)
+                    fc.append(faces + vert_stack)
+                    col.append(colors)
+
+                    vert_num = vertices.shape[1]
+                    vert_stack += vert_num
+                else:
+                    tgt_vertices, tgt_faces, tgt_colors = features_to_world_space_mesh(
+                        world_space_points=pts.detach(),
+                        colors=color.detach(),
+                        edge_threshold=0.48,
+                        H = side_length
+                    )
+                                        
+        vertices = torch.cat(vert, dim=-1)
+        faces = torch.cat(fc, dim=-1)
+        colors = torch.cat(col, dim=-1)
+
+        if full_condition:
+            tgt_mesh, o3d_device = torch_to_o3d_cuda_mesh(tgt_vertices, tgt_faces, tgt_colors, device = pts.device)
+            mesh, _ = torch_to_o3d_cuda_mesh(vertices, faces, colors, device = pts.device)
+            
+        else:
+            tgt_mesh, o3d_device = torch_to_o3d_cuda_mesh(vertices, faces, colors, device = pts.device)
+            mesh = tgt_mesh
+
+        inv_extrins = np.linalg.inv(extrins)
+        rendered_depth, normals = mesh_rendering(tgt_mesh, focal_length, inv_extrins, o3d_device)
+        rays_o, rays_d = get_rays(orig_length, orig_length, focal_length.to(device), torch.tensor(extrins).to(device), 1, device)
+        mask = (rendered_depth != 0)
+
+        proj_pts = mask[...,None].to(device) * (rays_o[0,0] + rendered_depth[...,None].to(device) * rays_d[0,0])
+
+        if cfg.use_normal_mask:
+            center_dir = rays_d[0, 0, 256, 256][None,None,...] 
+
+            normed_center_dir = -center_dir / torch.norm(center_dir, dim=-1, keepdim=True) 
+            normed_normals = normals.to(device) / torch.norm(normals, dim=-1, keepdim=True).to(device)
+
+            dot_product = torch.clamp(torch.sum(normed_center_dir * normed_normals, dim=-1, keepdim=True), -1.0, 1.0) 
+            angle_difference = torch.acos(dot_product)
+
+            angle_mask = angle_difference > (torch.pi * 1/2)
+            mesh_normal_mask.append(angle_mask)
+
+        mesh_pts.append(proj_pts)
+        mesh_depth.append(rendered_depth)
+        mesh_normals.append(normals)
+
+        if cfg.use_normal:
+            per_batch_ref_normals = []
+
+            for ref_extrins, ref_focal in zip(ref_camera["pose"][i], ref_camera["focals"][i]):
+                ref_extrins = ref_extrins.detach().cpu().numpy()
+                ref_pose = np.linalg.inv(ref_extrins)
+                ref_depths, ref_normals = mesh_rendering(mesh, ref_focal, ref_pose, o3d_device)
+                per_batch_ref_normals.append(ref_normals.permute(2,0,1))
+            
+            mesh_ref_normals = torch.stack(per_batch_ref_normals)
+            mesh_ref_normal_list.append(mesh_ref_normals)
+        
+    mesh_pts = torch.stack(mesh_pts)
+    mesh_depth = torch.stack(mesh_depth).to(device)
+    mesh_normals = torch.stack(mesh_normals)
+
+    if cfg.use_normal:
+        mesh_ref_normals = torch.stack(mesh_ref_normal_list)
+
+    if cfg.use_normal_mask:
+        # save_image(torch.cat((mesh_normals.permute(0,3,1,2).to(device), mesh_normal_mask[0][None,...].permute(0,3,1,2).repeat(1,3,1,1))), "new.png")
+
+        mesh_normal_mask = (1 - torch.stack(mesh_normal_mask).float()).to(device)
+
+        mesh_pts = mesh_pts * mesh_normal_mask
+        mesh_depth = mesh_depth * mesh_normal_mask[...,0]
+        mesh_normals = mesh_normals.to(device) * mesh_normal_mask
+            
+    return tgt_depth_norm, ref_depth, mesh_pts, mesh_depth, mesh_normals, mesh_ref_normals, mesh_normal_mask, norm_depth, confidence_map, plucker, tgt_depth

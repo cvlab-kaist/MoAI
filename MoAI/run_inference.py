@@ -19,7 +19,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-import torch.utils.checkpoint
 import transformers
 import cv2
 import multiprocessing as mp
@@ -43,9 +42,7 @@ import random
 import webdataset as wds
 import time
 from PIL import Image
-from genwarp import GenWarp
 from time import gmtime, strftime
-
 
 from torchvision.transforms import ToTensor, ToPILImage
 from torchvision.utils import save_image
@@ -63,54 +60,26 @@ from einops import rearrange
 from training_utils import forward_warper, camera_controller, plucker_embedding, get_embedder, get_coords
 from torchvision.transforms.functional import to_pil_image
 
-from lora_diffusion import inject_trainable_lora, extract_lora_ups_down
-
-
-from train_marigold import mari_embedding_prep
-
-import copy
-
 from main.utils.attn_visualizer import sample_zero_mask_pixels, get_attn_map, stitch_side_by_side
 
 from main.utils import (
     reprojector,
-    ndc_rasterizer,
-    get_rays,
-    pose_to_ray,
-    one_to_one_rasterizer,
     mesh_rendering,
     features_to_world_space_mesh,
-    torch_to_o3d_mesh,
     torch_to_o3d_cuda_mesh,
-    compute_plucker_embed,
-    postprocess_co3d,
-    postprocess_realestate,
-    postprocess_combined,
-    postprocess_vggt,
     PointmapNormalizer,
-    UncertaintyLoss,
     EvalBatch,
     camera_search,
-    revisit_eval,
-    overlay_grid_and_save
+    overlay_grid_and_save,
+    mari_embedding_prep
 )
 
-from data.co3d_dataset import Co3DDataset
-from realestate_dataset import RealEstateDataset
 
 import torchvision.transforms as transforms
-from torch.utils.data import Dataset, DataLoader
 from einops import rearrange, repeat
-from functools import partial
 from camera_visualization import pointmap_vis
-
-# real10k
-from dataset.preprocessed_re10k import PreprocessedRe10k
-from dataset.preprocessed_megascenes import PreprocessedMegaScenes
-
 from transformers import CLIPImageProcessor
-from training_utils import pred_depth_inference
-from dataset.scannet import Scannetdataset
+
 
 warnings.filterwarnings("ignore")
 
@@ -124,10 +93,8 @@ os.environ["XDG_RUNTIME_DIR"] = "/tmp/runtime"
 if not os.path.exists("/tmp/runtime"):
     os.makedirs("/tmp/runtime", mode=0o700)
     
-import open3d as o3d
 
-
-class Net(nn.Module):
+class MoAI(nn.Module):
     def __init__(
         self,
         reference_unet: UNet2DConditionModel,
@@ -464,17 +431,8 @@ def prepare_duster_embedding(
     correspondence,
     camera_info,
     embedder=None,
-    src_idx=None,
-    tgt_idx=None,
-    dataset="co3d",
-    projection_config="target_only",  
     normalize_coord=True,
     tgt_image=None,
-    point_masking=False,
-    masking_percent=0.5,
-    use_gt_cor=False,
-    pure_gt=False,
-    gt_threshold=0.005,
     ref_depth=None,
     confidence=None,
     warp_image=True,
@@ -484,11 +442,9 @@ def prepare_duster_embedding(
     mesh_ref_normals=None,
     normal_mask=None,
     plucker=None,
-    gt_cor_regularize=False,
     pts_norm_func=None,
     current_dataset="multi",
     full_condition=False,
-    nomesh_normal=False
 ):
     
     # Prepare inputs.
@@ -980,129 +936,69 @@ def main(cfg):
     # val_noise_scheduler = DDIMScheduler(**sched_kwargs)
     sched_kwargs.update({"beta_schedule": "scaled_linear"})
     
-    if not cfg.inference:
-        train_noise_scheduler = DDIMScheduler(**sched_kwargs)
-    
-    if cfg.inference:
-        val_scheduler = DDIMScheduler(**sched_kwargs)
-        val_scheduler.set_timesteps(
-            20, device="cuda")
-        num_train_timesteps = val_scheduler.config.num_train_timesteps
+    val_scheduler = DDIMScheduler(**sched_kwargs)
+    val_scheduler.set_timesteps(
+        20, device="cuda")
 
     vae = AutoencoderKL.from_pretrained(cfg.vae_model_path).to(
         "cuda", dtype=weight_dtype
     )
 
-    # Option whether to start training from scratch or not
-    train_from_scratch = cfg.train_from_scratch
-
     cond_channels = 16
     if cfg.use_depthmap:
         cond_channels += 1
-    if cfg.use_conf:
-        cond_channels += 1
     if cfg.use_normal:
         cond_channels += 3
-
-    # Pose guider.
-    pose_guider = PoseGuider(
-        conditioning_embedding_channels=320,
-        conditioning_channels=cond_channels,
-    ).to(device="cuda", dtype=weight_dtype)
     
-    # TEST MARIGOLD
-    
-    if not train_from_scratch:
-        # Reference Unet.
-        reference_unet = UNet2DConditionModel.from_config(
-            UNet2DConditionModel.load_config(
-                join(cfg.model_config_path, 'config.json')
-        )).to(device="cuda", dtype=weight_dtype)
-
-        reference_unet.load_state_dict(torch.load(
-            join(cfg.model_path, 'reference_unet.pth'),
-            map_location= 'cpu'),
-        )
-        # Denoising Unet.
-        denoising_unet = UNet3DConditionModel.from_pretrained_2d(
-            join(cfg.model_config_path, 'config.json'),
-            join(cfg.model_path, 'denoising_unet.pth')
-        ).to(device="cuda", dtype=weight_dtype)
-            
-        # Geometry Unets.
+    device, dtype = "cuda", weight_dtype
+    num_viewpoints = cfg.dataset.num_viewpoints
+    num_ref_viewpoints = cfg.dataset.num_ref
         
-        path_dict = {
-            "depth" : cfg.model_depth_path,
-            "pointmap" : cfg.model_pointmap_path,
-            "normal" : cfg.model_normal_path
-        }
-        
-        if cfg.train_from_complete:
-            geometry_unet = UNet3DConditionModel.from_pretrained_2d(
-                join(cfg.model_config_path, 'geometry_config.json'),
-                join(path_dict[cfg.geo_setting], f'geometry_unet.pth')
-            ).to(device="cuda", dtype=weight_dtype)       
-        else:
-            geometry_unet = UNet3DConditionModel.from_pretrained_2d(
-                join(path_dict[cfg.geo_setting], 'config.json'),
-                join(path_dict[cfg.geo_setting], 'diffusion_pytorch_model.bin')
-            ).to(device="cuda", dtype=weight_dtype)   
-            print("Loading directly from marigold") 
+    def init_2d(model_cls, config_fname, weight_fname, **init_kwargs):
+        cfg_path = join(cfg.model_path, config_fname)
+        model = model_cls.from_config(model_cls.load_config(cfg_path), **init_kwargs)
+        model.to(device=device, dtype=dtype)
+        model.load_state_dict(torch.load(
+            join(cfg.model_path, weight_fname),
+            map_location="cpu"
+        ))
+        return model
 
-        geo_reference_unet = UNet2DConditionModel.from_config(
-            UNet2DConditionModel.load_config(
-                join(cfg.model_config_path, 'geo_ref_config.json')
-        )).to(device="cuda", dtype=weight_dtype)
+    def init_3d(model_cls, config_fname, weight_fname):
+        return model_cls.from_pretrained_2d(
+            join(cfg.model_path, config_fname),
+            join(cfg.model_path, weight_fname)
+        ).to(device=device, dtype=dtype)
 
-        geo_reference_unet.load_state_dict(torch.load(
-            join(path_dict[cfg.geo_setting], 'geo_reference_unet.pth'),
-            map_location= 'cpu'),
-        )        
-                        
-        pose_guider.load_state_dict(torch.load(
-            join(cfg.model_path, 'pose_guider.pth'),
-            map_location='cpu'),
-        )
+    pose_guider           = PoseGuider(320, cond_channels).to(device=device, dtype=dtype)
+    reference_unet        = init_2d(UNet2DConditionModel, "config.json",         "reference_unet.pth")
+    denoising_unet        = init_3d(UNet3DConditionModel, "config.json",         "denoising_unet.pth")
+    geometry_unet         = init_3d(UNet3DConditionModel, "geometry_config.json","geometry_unet.pth")
+    geo_reference_unet    = init_2d(UNet2DConditionModel, "geo_ref_config.json", "geo_reference_unet.pth")
 
-
-    else:
-        reference_unet = UNet2DConditionModel.from_config(
-            UNet2DConditionModel.load_config(
-                join(cfg.model_path_scratch, 'config.json')
-        )).to(device="cuda", dtype=weight_dtype)
-
-        denoising_unet = UNet3DConditionModel.from_pretrained_2d(
-            join(cfg.model_path_scratch, 'config.json'),
-            join(cfg.model_path_scratch, 'denoising_unet.bin')
-        ).to(device="cuda", dtype=weight_dtype)
-
-        ref_param_names = [ name for name,_ in reference_unet.named_parameters()]
-        loading_params = {key : param for key, param in torch.load(join(cfg.model_path_scratch, 'denoising_unet.bin'),map_location= 'cpu').items()
-                        if key in ref_param_names}
-        reference_unet.load_state_dict(loading_params)
+    pose_guider.load_state_dict(torch.load(
+        join(cfg.model_path, 'pose_guider.pth'),
+        map_location='cpu'),
+    )
     
     image_enc = CLIPVisionModelWithProjection.from_pretrained(
         cfg.image_encoder_path,
     ).to(dtype=weight_dtype, device="cuda")
 
     clip_preprocessor = CLIPImageProcessor()
+    embedder, out_dim = get_embedder(2)
 
     # Freeze
-    vae.requires_grad_(False)
-    image_enc.requires_grad_(False)
-
-    # Explictly declare training models
-    use_lora = cfg.use_lora
-    
-    #TODO : temporarily can be disabled for debugging
-    pose_guider.requires_grad_(True)
-        
-    denoising_unet.requires_grad_(False)
-    reference_unet.requires_grad_(False)
-    pose_guider.requires_grad_(False)   
-    
-    geometry_unet.requires_grad_(False)
-    geo_reference_unet.requires_grad_(False)
+    for m in (
+        vae,
+        image_enc,
+        denoising_unet,
+        reference_unet,
+        pose_guider,
+        geometry_unet,
+        geo_reference_unet,
+    ):
+        m.requires_grad_(False)
             
     reference_control_writer = ReferenceAttentionControl(
         reference_unet,
@@ -1145,7 +1041,8 @@ def main(cfg):
         geo_reference_control_writer,
         geo_reference_control_reader
     ]    
-    net = Net(
+    
+    net = MoAI(
         *net_variables
     )
     
@@ -1164,84 +1061,12 @@ def main(cfg):
             raise ValueError(
                 "xformers is not available. Make sure it is installed correctly"
             )
-
-    if cfg.solver.gradient_checkpointing:
-        reference_unet.enable_gradient_checkpointing()
-        denoising_unet.enable_gradient_checkpointing()
-        geometry_unet.enable_gradient_checkpointing()
-        geo_reference_unet.enable_gradient_checkpointing()
-    
-    if not cfg.inference:
-        if cfg.solver.scale_lr:
-            learning_rate = (
-                cfg.solver.learning_rate
-                * cfg.solver.gradient_accumulation_steps
-                * cfg.dataset.train_bs
-                * accelerator.num_processes
-            )
-        else:
-            learning_rate = cfg.solver.learning_rate
-
-        # Initialize the optimizer
-        if cfg.solver.use_8bit_adam:
-            try:
-                import bitsandbytes as bnb
-            except ImportError:
-                raise ImportError(
-                    "Please install bitsandbytes to use 8-bit Adam. You can do so by running `pip install bitsandbytes`"
-                )
-
-            optimizer_cls = bnb.optim.AdamW8bit
-        else:
-            optimizer_cls = torch.optim.AdamW
-
-        trainable_params = list(filter(lambda p: p.requires_grad, net.parameters()))
-
-        optimizer = optimizer_cls(
-            trainable_params,
-            lr=learning_rate,
-            betas=(cfg.solver.adam_beta1, cfg.solver.adam_beta2),
-            weight_decay=cfg.solver.adam_weight_decay,
-            eps=cfg.solver.adam_epsilon,
-        )
-
-    dataset = cfg.dataset.name
-    num_viewpoints = cfg.dataset.num_viewpoints
-    num_ref_viewpoints = cfg.dataset.num_ref
-
-    ENDPOINT_URL = 'https://storage.clova.ai'
-
-    os.environ['AWS_ACCESS_KEY_ID'] = "AUIVA2ODFS9S2YDD0A75"
-    os.environ['AWS_SECRET_ACCESS_KEY'] = "VDIVVqIC9FCC0GmOQ2nNy3o7NjkWVqC4oTDOz3mM"
-    os.environ['S3_ENDPOINT_URL'] = ENDPOINT_URL
-
-    num_list = torch.arange(0, 1200)
-
-    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
-        world_size = int(os.environ["WORLD_SIZE"])
-    else:
-        world_size = 1
-        
-    embedder, out_dim = get_embedder(2)
-    
-    if cfg.geo_first:
-        if cfg.train_geo_only:
-            attn_proc_hooker=XformersCrossAttentionHooker(False, num_ref_views=num_ref_viewpoints, setting="writing", cross_attn=cfg.use_geo_ref_unet)
-        else:
-            attn_proc_hooker=XformersCrossAttentionHooker(True, num_ref_views=num_ref_viewpoints, setting="writing", cross_attn=cfg.use_geo_ref_unet, save_attn_map=cfg.visualize_attention)
             
-        denoising_unet.set_attn_processor(attn_proc_hooker)
-        geo_attn_proc_hooker=XformersCrossAttentionHooker( True, num_ref_views=num_ref_viewpoints, setting="reading", cross_attn=cfg.use_geo_ref_unet)
-        geometry_unet.set_attn_processor(geo_attn_proc_hooker)
-        
-    if cfg.geo_second:
-        geo_attn_proc_hooker_2=XformersCrossAttentionHooker( True, num_ref_views=num_ref_viewpoints, setting="reading", cross_attn=cfg.use_geo_2_ref_unet)
-        geometry_unet_2.set_attn_processor(geo_attn_proc_hooker_2)
-
-    if cfg.geo_third:
-        geo_attn_proc_hooker_3=XformersCrossAttentionHooker( True, num_ref_views=num_ref_viewpoints, setting="reading", cross_attn=False)
-        geometry_unet_3.set_attn_processor(geo_attn_proc_hooker_3)
-    
+    attn_proc_hooker=XformersCrossAttentionHooker(True, num_ref_views=num_ref_viewpoints, setting="writing", cross_attn=cfg.use_geo_ref_unet, save_attn_map=False)    
+    denoising_unet.set_attn_processor(attn_proc_hooker)
+    geo_attn_proc_hooker=XformersCrossAttentionHooker( True, num_ref_views=num_ref_viewpoints, setting="reading", cross_attn=cfg.use_geo_ref_unet)
+    geometry_unet.set_attn_processor(geo_attn_proc_hooker)
+         
     # Pointmap embedder initialization
     if cfg.embed_pointmap_norm:        
         if cfg.train_vggt:
@@ -1251,835 +1076,373 @@ def main(cfg):
             ptsmap_min = torch.tensor([-0.1798, -0.2254,  0.0593]).to(image_enc.device)
             ptsmap_max = torch.tensor([0.1899, 0.0836, 0.7480]).to(image_enc.device)
             
-        pts_norm_func = PointmapNormalizer(ptsmap_min, ptsmap_max, k=0.9
+        pts_norm_func = PointmapNormalizer(ptsmap_min, ptsmap_max, k=0.9)
         
-    device = image_enc.device    
-    eval_batchify = EvalBatch(device)
-        
+    device = image_enc.device            
     now = strftime("%m_%d_%H_%M_%S", gmtime())
-    to_pil = ToPILImage() 
     ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
     lpips_fn = lpips.LPIPS(net='alex').to(device)
-    
-    for epoch in range(first_epoch, num_train_epochs):
 
-        train_loss = 0.0
-        full_condition = False
+    eval_batchify = EvalBatch(device)
+    batch = eval_batchify.images_eval(image_dir=cfg.eval_image_dir)
+    src_idx = [0,1]
+    target_idx_list = [1]
+        
+    instance_now = strftime("%m_%d_%H_%M_%S", gmtime())
+    pointmap_list = []
+    target_pose_list = []
 
-        for step, batch in enumerate(train_dataloader):
-                                                
-            if cfg.infer_setting == "realestate_eval":
-                batch = eval_batchify.realestate_eval(setting=cfg.re10k_eval_setting)
+    for target_idx in target_idx_list:
+        
+        images = dict(ref=[batch["image"][:,k].unsqueeze(1) for k in src_idx], tgt=batch["image"][:,target_idx])
 
-            if cfg.infer_setting == "dtu_eval":
-                batch = eval_batchify.dtu_eval(setting="interpolate")
-                single_view = True
-                
-                target_idx_list = [2]
-                src_idx = [0,1]
-                
-                if single_view:
-                                        
-                    batch_size, num_view, _, _ = batch['extrinsic'].shape
-                    pointmaps = batch['points'].permute(0,1,3,4,2)
-                    w2c = torch.cat((batch['extrinsic'], torch.tensor([0,0,0,1]).to(device)[None,None,None,...].repeat(batch_size, num_view, 1, 1)), dim=-2)
-                    extrinsic = torch.linalg.inv(w2c)                                                                                       
-                    focal_list = []
-                    
-                    for i in batch["intrinsic"]:
-                        min_val, idx = i[0,:2,2].min(dim=-1)
-                        focal_list.append(i[:,int(idx),int(idx)] * (256 / min_val))
-                    
-                    focal = torch.stack(focal_list)[...,None]
-                                                    
-                    ref_camera=dict(pose=extrinsic[:,src_idx].float(), 
-                        focals=focal[:,src_idx], 
-                        orig_img_size=torch.tensor([512, 512]).to(device))
-
-                    tgt_camera=dict(pose=extrinsic[:,target_idx].float(),
-                        focals=focal[:,target_idx],
-                        orig_img_size=torch.tensor([512, 512]).to(device))
-                    
-                    closest_idx = find_closest_camera(reference_cameras=ref_camera["pose"], target_pose=tgt_camera["pose"])
-                    
-                    src_idx = [src_idx[closest_idx]]
-                
-            with accelerator.accumulate(net):
-                # Convert videos to latent space 
-                psnr_list =[]
-                ssim_list =[]
-                lpips_list =[]
-                
-                if cfg.view_select:
-                    target_pose_list = []
-                
-                if cfg.infer_setting == "realestate_eval":
-                    
-                    if cfg.re10k_eval_setting == "extrapolate":
-                        target_idx_list = [4,5,6]
-                        src_idx = [0,1,2,3]
+        with torch.no_grad():
+            batch_size, num_view, _, _ = batch['extrinsic'].shape
+            pointmaps = batch['points'].permute(0,1,3,4,2)
+            w2c = torch.cat((batch['extrinsic'], torch.tensor([0,0,0,1]).to(device)[None,None,None,...].repeat(batch_size, num_view, 1, 1)), dim=-2)
+            orig_extrinsic = torch.linalg.inv(w2c)
                         
-                        if cfg.re10k_view_exp:
-                            src_idx = src_idx[:cfg.re10k_eval_viewpoint]
-                        else:
-                            src_idx = [0,1]
-                    else:
-                        target_idx_list = [2,3,4]
-                        src_idx = [0,1]
-                    
-                elif cfg.infer_setting == "dtu_eval":
-                    target_idx_list = [2]
-                    src_idx = [0,1]
-                
-                elif cfg.infer_setting == "view_search":
-                    target_idx_list = [2,3,4]
-                    src_idx = [0,1]
-                                    
-                elif cfg.infer_setting == "co3d_eval":
-                    if uniform_sampling:
-                    # if cfg.dataset.num_ref != 1: 
-                        src_idx = random.sample(range(sampling_views - 5), 1)[0]
-                        src_idx = random.sample(range(src_idx, src_idx + 4), cfg.dataset.num_ref)
-                        
-                        target_idx_list = [k for k in range(sampling_views) if k not in src_idx]
-                        if cfg.view_select:
-                            target_idx_list = target_idx_list[:4]
-                        pointmap_list = []
-                        
-                    else:
-                        target_idx = 1
-                        src_idx = [k for k in range(num_viewpoints) if k is not target_idx]
-                        target_idx_list = [target_idx]
-                
-                elif cfg.infer_setting == "revisit":
-                    batch, src_idx, target_idx_list, loaded_keypoints_dict = revisit_eval(scene_dir = cfg.revisit_dir)
-                    
-                                            
-                elif cfg.infer_setting == "like_training":
-                    if not cfg.interpolate_only:                          
-                        target_idx = random.sample(range(cfg.dataset.num_viewpoints),1)[0]
-                    else:
-                        target_idx = random.sample(range(1,cfg.dataset.num_viewpoints-1),1)[0]
-
-                    src_idx = [k for k in range(num_viewpoints) if k is not target_idx]
-                    target_idx_list = [target_idx]    
-                
-                else:
-                    raise NotImplementedError("Inference setting is not implemented yet")
-                
-                if cfg.my_select:
-                    save_image(batch["image"][0,src_idx], "TEASER.png")
-                    
-                    scene_select = input("Go with this scene? yes or no : ")
-                    
-                    if scene_select == "no":
-                        continue
-                    else:
-                        pass            
-                
-                instance_now = strftime("%m_%d_%H_%M_%S", gmtime())
-                
-                pointmap_list = []
-                geo_data = {"all":[], "known":[], "unknown":[]}
-
-                for target_idx in target_idx_list:
-                    
-                    images = dict(ref=[batch["image"][:,k].unsqueeze(1) for k in src_idx], tgt=batch["image"][:,target_idx])
-
-                    with torch.no_grad():
-                        # Dataloader
-                        if not cfg.train_vggt:
-                            batch_size = batch['pose'].shape[0]
-
-                            ref_camera=dict(pose=batch['pose'][:,src_idx].float(), 
-                                focals=batch['focals'][:,src_idx], 
-                                orig_img_size=torch.tensor([512, 512]).to(device))
-
-                            tgt_camera=dict(pose=batch['pose'][:,target_idx].float(),
-                                focals=batch['focals'][:, target_idx],
-                                orig_img_size=torch.tensor([512, 512]).to(device))
-                        
-                            closest_idx = find_closest_camera(reference_cameras=ref_camera["pose"], target_pose=tgt_camera["pose"])
-                            camera_info = dict(ref=ref_camera, tgt=tgt_camera)
-                            correspondence = dict(ref=batch['points'][:, src_idx].float(), tgt=batch['points'][:, target_idx].float())
-                            
-                        else:
-                            batch_size, num_view, _, _ = batch['extrinsic'].shape
-                            pointmaps = batch['points'].permute(0,1,3,4,2)
-                            w2c = torch.cat((batch['extrinsic'], torch.tensor([0,0,0,1]).to(device)[None,None,None,...].repeat(batch_size, num_view, 1, 1)), dim=-2)
-                            orig_extrinsic = torch.linalg.inv(w2c)
-                                        
-                            if cfg.normalized_pose:
-                                extrinsic = torch.matmul(w2c[:,target_idx].unsqueeze(1), orig_extrinsic)
-                                pointmaps = torch.matmul(w2c[:,target_idx][:,None,None,None,:3,:3], pointmaps[...,None]).squeeze(-1) + w2c[:,target_idx][:,None,None,None,:3,3]
-                                                                                                                        
-                            focal_list = []
-                            
-                            for i in batch["intrinsic"]:
-                                min_val, idx = i[0,:2,2].min(dim=-1)
-                                focal_list.append(i[:,int(idx),int(idx)] * (256 / min_val))
-                            
-                            focal = torch.stack(focal_list)[...,None]
-                                                            
-                            ref_camera=dict(pose=extrinsic[:,src_idx].float(), 
-                                focals=focal[:,src_idx], 
-                                orig_img_size=torch.tensor([512, 512]).to(device))
-
-                            tgt_camera=dict(pose=extrinsic[:,target_idx].float(),
-                                focals=focal[:,target_idx],
-                                orig_img_size=torch.tensor([512, 512]).to(device))
-                        
-                            closest_idx = find_closest_camera(reference_cameras=ref_camera["pose"], target_pose=tgt_camera["pose"])
-                            camera_info = dict(ref=ref_camera, tgt=tgt_camera)
-                            correspondence = dict(ref=pointmaps[:, src_idx].float(), tgt=pointmaps[:, target_idx].float())
-                            
-                            if batch['dataset'][0] == 1:
-                                current_dataset = "realestate"
-                            else:
-                                current_dataset = "co3d"
-                    
-                        if cfg.view_select:
-                            search = True
-                                                        
-                            pts_locs = correspondence["ref"].reshape(1,-1,3)
-                            pts_rgb = torch.cat(images['ref'],dim=1)[0].permute(0,2,3,1).reshape(1,-1,3)
-                            search_cam = tgt_camera.copy()
-                            
-                            # Initial rendering                  
-                            rendering, _ = reprojector(pts_locs, pts_rgb, search_cam, device=device, coord_channel=3, get_depth=False)
-                            
-                            overlay_grid_and_save(rendering.permute(0,3,1,2)[0], out_path="RENDERING.png")
-                                                        
-                            while search:
-                                movement_cmd = input("Cmd [W/A/S/D translate, T/F/G/H rotate, END to finish]: ").strip().upper()
-                                
-                                cam_pose = search_cam["pose"]
-                                search_cam["pose"] = camera_search(cam_pose[0], movement_cmd, device)
-                                
-                                rendering, _ = reprojector(pts_locs, pts_rgb, search_cam, device=device, coord_channel=3, get_depth=False)
-                                overlay_grid_and_save(rendering.permute(0,3,1,2)[0], out_path="RENDERING.png")
-                                
-                                ask_continue = input("Continue searching, or no? : ")
-                                
-                                if ask_continue == "no":
-                                    search = False
-                                else:
-                                    pass
-                                
-                            tgt_camera["pose"] = search_cam["pose"]  
-                            camera_info["tgt"] = tgt_camera
-                            
-                            target_pose_list.append(torch.matmul(orig_extrinsic[:,target_idx],search_cam["pose"]))
-                            
-                            if cfg.infer_setting == "revisit":
-                                load_key = input("Load past keypoint? yes or no : ")
-                                if load_key == "no":
-                                    # clean up the code later
-                                    keypoint_select = input("Select keypoint? yes or no : ")
-                                    
-                                    if keypoint_select == "yes":
-                                        x_index = int(input("Input x index : "))
-                                        y_index = int(input("Input y index : "))
-                                        
-                                        keypoint_one = torch.tensor([[y_index,x_index]]).to(device)
-                                        print("Keypoint 1 selected.")
-                                        
-                                        x_index = int(input("Input x index : "))
-                                        y_index = int(input("Input y index : "))
-                                        
-                                        keypoint_two = torch.tensor([[y_index,x_index]]).to(device)
-                                        print("Keypoint 2 selected.")
-                                        
-                                        attn_keypoints = torch.cat((keypoint_one, keypoint_two))
-                                        
-                                        y_idxs = attn_keypoints[:,0]
-                                        x_idxs = attn_keypoints[:,1]
-                                        
-                                        attn_proc_hooker.y_idxs = y_idxs
-                                        attn_proc_hooker.x_idxs = x_idxs
-                                        keypoint_selected = True
-                                            
-                                    else:
-                                        keypoint_selected = False
-                                    
-                                else:
-                                    attn_keypoints = torch.tensor(loaded_keypoints_dict[str(target_idx)],dtype = torch.int)
-
-                                    y_idxs = attn_keypoints[:,0]
-                                    x_idxs = attn_keypoints[:,1]
-                                    
-                                    attn_proc_hooker.y_idxs = y_idxs
-                                    attn_proc_hooker.x_idxs = x_idxs
-                                    keypoint_selected = True
-                            
-                            else:
-                                keypoint_select = input("Select keypoint? yes or no : ")
-                                
-                                if keypoint_select == "yes":
-                                    x_index = int(input("Input x index : "))
-                                    y_index = int(input("Input y index : "))
-                                    
-                                    keypoint_one = torch.tensor([[y_index,x_index]]).to(device)
-                                    print("Keypoint 1 selected.")
-                                    
-                                    x_index = int(input("Input x index : "))
-                                    y_index = int(input("Input y index : "))
-                                    
-                                    keypoint_two = torch.tensor([[y_index,x_index]]).to(device)
-                                    print("Keypoint 2 selected.")
-                                    
-                                    attn_keypoints = torch.cat((keypoint_one, keypoint_two))
-                                    
-                                    y_idxs = attn_keypoints[:,0]
-                                    x_idxs = attn_keypoints[:,1]
-                                    
-                                    attn_proc_hooker.y_idxs = y_idxs
-                                    attn_proc_hooker.x_idxs = x_idxs
-                                    keypoint_selected = True
-                                        
-                                else:
-                                    keypoint_selected = False
-                            
-                        else:
-                            keypoint_selected = False
-                                
-
-                        tgt_depth_norm, ref_depth, mesh_pts, mesh_depth, mesh_normals, mesh_ref_normals, mesh_normal_mask, norm_depth, confidence_map, plucker, tgt_depth = mari_embedding_prep(cfg, images, correspondence, ref_camera, tgt_camera, src_idx, batch_size, device, full_condition=full_condition)
-                        src_images = images["ref"]
-                        
-                        args = dict(
-                            src_images=src_images,
-                            correspondence=correspondence,
-                            camera_info=camera_info,
-                            embedder=embedder,
-                            src_idx=src_idx,
-                            tgt_idx=target_idx,
-                            dataset=dataset,
-                            tgt_image=images["tgt"],
-                            point_masking=cfg.point_masking,
-                            masking_percent=cfg.masking_percent,
-                            use_gt_cor=cfg.use_gt_cor,
-                            pure_gt=cfg.pure_gt,
-                            gt_threshold=cfg.gt_mask_threshold,
-                            current_dataset=current_dataset
-                        )
-
-                        if cfg.use_mesh:
-                            args["mesh_pts"] = mesh_pts
-                            args["mesh_depth"] = mesh_depth
-                        
-                        if cfg.use_normal:
-                            args["mesh_normals"] = mesh_normals.to(device)
-                            args["mesh_ref_normals"] = mesh_ref_normals.to(device)
-
-                        if cfg.use_depthmap:
-                            args["ref_depth"] = norm_depth
-
-                        if cfg.use_conf:
-                            args["confidence"] = confidence_map
-
-                        if cfg.gt_cor_reg:
-                            args["gt_cor_regularize"] = True
-                            
-                        if cfg.embed_pointmap_norm:
-                            args["pts_norm_func"] = pts_norm_func
-                        
-                        conditions, renders = prepare_duster_embedding(**args)
-                        latents = vae.encode(images["tgt"].to(weight_dtype) * 2 - 1).latent_dist.sample()
-
-                        if cfg.geo_second:
-                            geo_setting_2 = cfg.geo_setting_2 
-                        else:
-                            geo_setting_2 = None
-                    
-                        if cfg.geo_third:
-                            geo_setting_3 = cfg.geo_setting_3
-                        else:
-                            geo_setting_3 = None
-                        
-                        if cfg.geo_setting == "depth" or geo_setting_2 == "depth":                          
-                            if geo_setting_2 == "depth":
-                                geo_latents_2 = vae.encode(tgt_depth_norm.to(weight_dtype)).latent_dist.sample()
-                            else:
-                                geo_latents = vae.encode(tgt_depth_norm.to(weight_dtype)).latent_dist.sample()
-                            
-                            if cfg.use_warped_geo_cond_at_geo:
-                                warped_depth = mesh_depth.unsqueeze(1).repeat(1,3,1,1)
-                                norm_warped_depth = depth_normalize(cfg, warped_depth)
-                                norm_warped_depth = torch.clip(norm_warped_depth, min=-1.0, max=1.0)
-                                warped_geo_encoded = vae.encode(norm_warped_depth).latent_dist.sample()
-
-                        
-                        if cfg.geo_setting == "pointmap" or geo_setting_2 == "pointmap":
-                            ref_pointmaps = correspondence["ref"].reshape(-1,512,512,3).permute(0,3,1,2)
-                            tgt_pointmap = correspondence["tgt"].permute(0,3,1,2)
-
-                            if cfg.use_warped_geo_cond_at_geo:   
-                                warped_tgt_pointmap = mesh_pts.permute(0,3,1,2)
-                            
-                            if cfg.conditioning_pointmap_norm:
-                                minmax_set = True if current_dataset != "realestate" else False
-                                
-                                if minmax_set:
-                                    if cfg.train_vggt:
-                                        ptsmap_min = torch.tensor([-0.6338, -0.4921, 0.4827]).to(image_enc.device)
-                                        ptsmap_max = torch.tensor([ 0.6190, 0.6307, 1.6461]).to(image_enc.device)            
-                                    else:   
-                                        ptsmap_min = torch.tensor([-0.1798, -0.2254,  0.0593]).to(image_enc.device)
-                                        ptsmap_max = torch.tensor([0.1899, 0.0836, 0.7480]).to(image_enc.device)
-                                    
-                                    ref_pointmaps = torch.clip((ref_pointmaps - ptsmap_min[None,...,None,None]) / (ptsmap_max[None,...,None,None] - ptsmap_min[None,...,None,None]) * 2 - 1.0, min=-1.0, max=1.0)
-                                    tgt_pointmap = torch.clip((tgt_pointmap - ptsmap_min[None,...,None,None]) / (ptsmap_max[None,...,None,None] - ptsmap_min[None,...,None,None]) * 2 - 1.0, min=-1.0, max=1.0)
-
-                                else:
-                                    ptsmap_min = correspondence["ref"].reshape(batch_size,-1,3).min(dim=-2)[0]
-                                    ptsmap_max = correspondence["ref"].reshape(batch_size,-1,3).max(dim=-2)[0]
-
-                                    ref_ptsmap_min = ptsmap_min.unsqueeze(1).repeat(1,num_ref_viewpoints,1).reshape(-1,3)
-                                    ref_ptsmap_max = ptsmap_max.unsqueeze(1).repeat(1,num_ref_viewpoints,1).reshape(-1,3)   
-                                                                    
-                                    ref_pointmaps = torch.clip((ref_pointmaps - ref_ptsmap_min[...,None,None]) / (ref_ptsmap_max[...,None,None] - ref_ptsmap_min[...,None,None]) * 2 - 1.0, min=-1.0, max=1.0)
-                                    tgt_pointmap = torch.clip((tgt_pointmap - ptsmap_min[...,None,None]) / (ptsmap_max[...,None,None] - ptsmap_min[...,None,None]) * 2 - 1.0, min=-1.0, max=1.0)
-                                    
-                            if cfg.use_warped_geo_cond_at_geo:   
-                                warped_tgt_pointmap = torch.clip((warped_tgt_pointmap - ptsmap_min[None,...,None,None]) / (ptsmap_max[None,...,None,None] - ptsmap_min[None,...,None,None]) * 2 - 1.0, min=-1.0, max=1.0)
-                                warped_geo_encoded = vae.encode(warped_tgt_pointmap.to(weight_dtype)).latent_dist.sample()
-                            
-                            if geo_setting_2 == "pointmap":
-                                geo_latents_2 = vae.encode(tgt_pointmap.to(weight_dtype)).latent_dist.sample()
-                            else:
-                                geo_latents = vae.encode(tgt_pointmap.to(weight_dtype)).latent_dist.sample()
-                        
-                        if cfg.geo_setting == "normal" or geo_setting_2 == "normal" or geo_setting_3 == "normal":
-                            normal = convert_depth_to_normal(tgt_depth_norm[:,:1])
-                            
-                            if geo_setting_3 == "normal": 
-                                geo_latents_3 = vae.encode(normal.to(weight_dtype)).latent_dist.sample()
-                            elif geo_setting_2 == "normal":
-                                geo_latents_2 = vae.encode(normal.to(weight_dtype)).latent_dist.sample()
-                            else:
-                                geo_latents = vae.encode(normal.to(weight_dtype)).latent_dist.sample()
-
-                        if cfg.use_warped_geo_cond_at_geo:
-                            warped_geo_encoded = warped_geo_encoded.unsqueeze(2) 
-                            warped_geo_encoded = warped_geo_encoded * 0.18215  
-                                                
-                        geo_latents = geo_latents.unsqueeze(2) 
-                        geo_latents = geo_latents * 0.18215  
-                        
-                        if cfg.geo_second:
-                            geo_latents_2 = geo_latents_2.unsqueeze(2) 
-                            geo_latents_2 = geo_latents_2 * 0.18215  
-
-                        if cfg.geo_third:
-                            geo_latents_3 = geo_latents_3.unsqueeze(2) 
-                            geo_latents_3 = geo_latents_3 * 0.18215  
-                        
-                        latents = latents.unsqueeze(2)  # (b, c, 1, h, w)
-                        latents = latents * 0.18215    
-
-                        if cfg.ref_net_expand:
-                            ref_input = conditions["ref_correspondence"]
-                            ref_encoded_batches = []
-                            for ref_corrs in ref_input:
-                                ref_encoded_batches.append(vae.encode(ref_corrs.permute(0,3,1,2)).latent_dist.sample()[None,...])
-                            ref_corr_latents = torch.cat(ref_encoded_batches, dim=0).permute(1,0,2,3,4)
-                            
-                        zero_mask = (renders["warped"][:,:1] != 0.).float()
-                        warped_image = zero_mask * (renders["warped"] * 2 - 1)
-                        if cfg.use_normal_mask and current_dataset != "realestate":
-                            warped_image = warped_image * mesh_normal_mask.permute(0,3,1,2)  
-                        warped_latents = vae.encode(warped_image).latent_dist.sample().unsqueeze(2)  
-                        warped_latents = warped_latents *  0.18215    
-                                                                
-                    is_warped_feat_injection = cfg.feature_fusion_type == 'warped_feature'
-                    
-                    noise = torch.randn_like(latents)
-
-                    if cfg.noise_offset > 0.0:
-                        noise += cfg.noise_offset * torch.randn(
-                            (noise.shape[0], noise.shape[1], 1, 1, 1),
-                            device=noise.device,
-                        )
-
-                    bsz = latents.shape[0]
-                    
-                    # Sample a random timestep for each video
-                    if not cfg.inference:
-                        timesteps = torch.randint(
-                            0,
-                            train_noise_scheduler.num_train_timesteps,
-                            (bsz,),
-                            device=latents.device,
-                        )
-                    else:
-                        # when inferencing, timestep.
-                        timesteps = val_scheduler.timesteps
-                                        
-                    timesteps = timesteps.long()
-
-                    uncond_fwd = random.random() < cfg.uncond_ratio
-                    clip_image_list = []
-                    ref_depth_list = []
-                    ref_image_list = []
-
-                    ref_stack = torch.cat(images["ref"], dim=1)
-                    B, V, C, H, W = ref_stack.shape
-
-                    ref_stack = ref_stack.reshape(-1,C,H,W) * 2 - 1 # Normalization
-
-                    if cfg.use_geo_ref_unet:
-                        for batch_idx, (ref_d, ref_img, clip_img) in enumerate(
-                            zip(
-                                ref_depth if cfg.geo_setting == "depth" else ref_pointmaps,
-                                ref_stack,
-                                clip_preprocessor(ref_stack*0.5+0.5, do_rescale=False, return_tensors="pt").pixel_values,
-                            )
-                        ):  
-                            if uncond_fwd:
-                                clip_image_list.append(torch.zeros_like(clip_img))
-                            else:
-                                clip_image_list.append(clip_img)
-                                
-                            ref_depth_list.append(ref_d)
-                            ref_image_list.append(ref_img)
-                    else:
-                        for batch_idx, (ref_img, clip_img) in enumerate(
-                            zip(
-                                ref_stack,
-                                clip_preprocessor(ref_stack*0.5+0.5, do_rescale=False, return_tensors="pt").pixel_values,
-                            )
-                        ):  
-                            if uncond_fwd:
-                                clip_image_list.append(torch.zeros_like(clip_img))
-                            else:
-                                clip_image_list.append(clip_img)
-                                
-                            ref_image_list.append(ref_img)
-
-                    with torch.no_grad():
-                        ref_img_stack = torch.stack(ref_image_list, dim=0).to(
-                            dtype=vae.dtype, device=vae.device
-                        )
-                        ref_image_latents = vae.encode(
-                            ref_img_stack
-                        ).latent_dist.sample()  # (bs, d, 64, 64)
-                        ref_image_latents = ref_image_latents * 0.18215
-                        
-                        clip_img = torch.stack(clip_image_list, dim=0).to(
-                            dtype=image_enc.dtype, device=image_enc.device
-                        )
-                        clip_image_embeds = image_enc(
-                            clip_img.to("cuda", dtype=weight_dtype)
-                        ).image_embeds
-                        image_prompt_embeds = clip_image_embeds.unsqueeze(1)  # (bs, 1, d)
-                        
-                        if cfg.use_geo_ref_unet:
-                            ref_depth_stack = torch.stack(ref_depth_list, dim=0).to(
-                                dtype=vae.dtype, device=vae.device
-                            )
-                            ref_depth_latents = vae.encode(
-                                ref_depth_stack
-                            ).latent_dist.sample()  # (bs, d, 64, 64)
-                            
-                            ref_depth_latents = ref_depth_latents * 0.18215
-                    
-                    # add noise
-                    if not cfg.inference:
-                        noisy_latents = train_noise_scheduler.add_noise(
-                            latents, noise, timesteps
-                        )
-                        
-                        geo_noisy_latents = train_noise_scheduler.add_noise(
-                            geo_latents, noise, timesteps
-                        )
-                        
-                        if cfg.geo_second:
-                            geo_noisy_latents_2 = train_noise_scheduler.add_noise(
-                                geo_latents_2, noise, timesteps
-                            )
-
-                        if cfg.geo_third:
-                            geo_noisy_latents_3 = train_noise_scheduler.add_noise(
-                                geo_latents_3, noise, timesteps
-                            )
-                    
-                        # Get the target for loss depending on the prediction type
-                        if train_noise_scheduler.prediction_type == "epsilon":
-                            target = noise
-                            geo_target = noise
-                            
-                            if cfg.geo_second:
-                                geo_target_2 = noise
-
-                            if cfg.geo_third:
-                                geo_target_3 = noise
-                                
-                            
-                        elif train_noise_scheduler.prediction_type == "v_prediction":
-                            target = train_noise_scheduler.get_velocity(
-                                latents, noise, timesteps
-                            )
-                            geo_target = train_noise_scheduler.get_velocity(
-                                geo_latents, noise, timesteps
-                            )
-                            
-                            if cfg.geo_second:
-                                geo_target_2 = train_noise_scheduler.get_velocity(
-                                    geo_latents_2, noise, timesteps
-                                )
-
-                            if cfg.geo_third:
-                                geo_target_3 = train_noise_scheduler.get_velocity(
-                                    geo_latents_3, noise, timesteps
-                                )
-                            
-                        else:
-                            raise ValueError(
-                                f"Unknown prediction type {train_noise_scheduler.prediction_type}"
-                            )
-                    
-                    else:                        
-                        initial_t = torch.tensor(
-                            [999] * batch_size
-                        ).to(device, dtype=torch.long)
-                            
-                        latents_noisy_start = val_scheduler.add_noise(
-                            latents, noise, initial_t
-                        )
-                        
-                        noisy_latents = latents_noisy_start
-                        geo_noisy_latents = latents_noisy_start
-                        if cfg.geo_second:
-                            geo_noisy_latents_2 = latents_noisy_start
-                        if cfg.geo_third:
-                            geo_noisy_latents_3 = latents_noisy_start
-                    
-
-                    # Image embeddings ------------------
-                    image_prompt_embeds = image_prompt_embeds.reshape(B,V,1,-1).permute(1,0,2,3)
-                    ref_image_latents = ref_image_latents.reshape(B,V,-1,64,64).permute(1,0,2,3,4)
-                    task_emb = None
-                    
-                    if cfg.use_warped_img_cond:
-                        noisy_latents = torch.cat((noisy_latents, warped_latents), dim=1)
-                    
-                    # Geometry embeddings ------------ (always have warped latents as condition)
-                    geo_noisy_latents = torch.cat((warped_latents, geo_noisy_latents), dim=1)
-                    
-                    # Partial geometry condition to geometry embedding
-                    if cfg.use_warped_geo_cond_at_geo:
-                        geo_noisy_latents = torch.cat((geo_noisy_latents, warped_geo_encoded), dim=1)
-                    
-                    # Reference network for geometry
-                    if cfg.use_geo_ref_unet:
-                        ref_depth_latents = ref_depth_latents.reshape(B,V,-1,64,64).permute(1,0,2,3,4)
-                        geo_ref_latents = torch.cat((ref_image_latents, ref_depth_latents), dim=2).to(weight_dtype)
-                    else:
-                        geo_ref_latents = None
-                    
-                    if cfg.visualize_attention and keypoint_selected == False:
-                        attn_keypoints = sample_zero_mask_pixels(zero_mask[0,0], 2)
-                        y_idxs = attn_keypoints[:,0]
-                        x_idxs = attn_keypoints[:,1]
-                        
-                        attn_proc_hooker.y_idxs = y_idxs
-                        attn_proc_hooker.x_idxs = x_idxs
-                                        
-                    with torch.no_grad():
-                        results_dict = net(
-                            noisy_latents.to(weight_dtype),
-                            geo_noisy_latents.to(weight_dtype),
-                            timesteps,
-                            ref_image_latents.to(weight_dtype),
-                            geo_ref_latents,
-                            image_prompt_embeds.to(weight_dtype),
-                            conditions["ref_embeds"], # V List of (B, 16, 512, 512) latents
-                            conditions["tgt_embed"].to(weight_dtype), # Tensor of (B, 16, 512, 512)
-                            correspondence=None,
-                            weight_dtype=weight_dtype,
-                            gt_target_coord_embed = conditions['gt_tgt_embed'] if conditions['gt_tgt_embed'] != None else None,
-                            task_emb=task_emb,
-                            attn_proc_hooker=attn_proc_hooker,
-                            geo_attn_proc_hooker=geo_attn_proc_hooker,
-                            val_scheduler=val_scheduler,
-                            vae = vae
-                        )
-                        
-                        # Directory for this inference                      
-                        exp_name = cfg.inference_run_name
-                        
-                        if cfg.infer_setting == "realestate_eval" or cfg.infer_setting == "dtu_eval":
-                            instance_name = batch["instance_name"]
-                            dir = f"{exp_name}/{now}/{instance_name}"
-                        else:
-                            dir = f"{exp_name}/{now}/{instance_now}"
-                        
-                        if not os.path.exists(dir):
-                            os.makedirs(dir)
-                                                    
-                        # Metrics
-                        diff_gt_ori = torch.sqrt((images["tgt"] - results_dict['img_pred'])**2).sum(dim=1).unsqueeze(1)
-                        diff_gt = apply_heatmap(diff_gt_ori).to(device)
-
-                        downsampled_gt = F.interpolate(images["tgt"], size=(256, 256), mode='bilinear', align_corners=False)
-                        downsampled_pred = F.interpolate(results_dict['img_pred'], size=(256, 256), mode='bilinear', align_corners=False)
-
-                        mse = F.mse_loss(images["tgt"], results_dict['img_pred'], reduction='mean')
-                        down_mse = F.mse_loss(downsampled_gt, downsampled_pred, reduction='mean')
-                        psnr = 10 * math.log10(1.0 / (down_mse.item()+1e-9))
-                        psnr_list.append(psnr)       
-                        print(psnr)
-                        
-                        ssim_value = float(ssim(downsampled_gt, downsampled_pred))
-                        lpips_value = float(lpips_fn(downsampled_gt.to(device), downsampled_pred.to(device)))
-                        
-                        ssim_list.append(ssim_value)
-                        lpips_list.append(lpips_value)
-
-                        # Geometry and its metrics
-                        if cfg.geo_first:
-                            depth_map = results_dict['geo_pred'][:,2:].repeat(1,3,1,1)       
-                            normal = convert_depth_to_normal(depth_map[:,:1])  
-                            gt_normal = convert_depth_to_normal(tgt_pointmap[:,2:] * 0.5 + 0.5)
-
-                            depth = apply_heatmap((depth_map[:,:1] != 0)* 1 / depth_map[:,:1]).to(device)   
-                            gt_depth = apply_heatmap( ((tgt_pointmap[:,2:] * 0.5 + 0.5)!=0) * 1 / (tgt_pointmap[:,2:] * 0.5 + 0.5)).to(device)  
-
-                            depth_results_all = depth_metrics(results_dict['geo_pred'][:,2:], tgt_pointmap[:,2:] *0.5 +0.5)
-                            depth_results_known = depth_metrics(results_dict['geo_pred'][:,2:], tgt_pointmap[:,2:] *0.5 +0.5, zero_mask[:,0].bool())
-                            depth_results_unknown = depth_metrics(results_dict['geo_pred'][:,2:], tgt_pointmap[:,2:] *0.5 +0.5, (1-zero_mask[:,0]).bool())
-                            
-                            geo_data["all"].append(depth_results_all)
-                            geo_data["known"].append(depth_results_known)
-                            geo_data["unknown"].append(depth_results_unknown)
-
-                        ref_images = torch.cat(images["ref"]).squeeze()
-                                                                            
-                        # Saving the images
-                        space = torch.ones(1,3,512,80).to(device)
-                        large_space = torch.ones(1,3,512,420).to(device)
-                        horz_space = torch.ones(1,3,60,512).to(device)
-                                                    
-                        for i, ref in enumerate(ref_images):
-                            save_image(ref, f"{dir}/ref_{i}.png")  
-                                                        
-                        if cfg.geo_first:
-                            stack_img = torch.cat((images["tgt"].to(device), space, zero_mask * (warped_image * 0.5 + 0.5), space, tgt_pointmap*0.5+0.5, space, gt_depth, space, results_dict['img_pred'], space, results_dict['geo_pred'], space, depth, space, normal * 0.5 + 0.5), dim=-1).detach()[0]                    
-                        else:
-                            stack_img = torch.cat((images["tgt"].to(device), space, zero_mask * (warped_image * 0.5 + 0.5), space, results_dict['img_pred']), dim=-1).detach()[0]                    
-                        
-                        save_image(stack_img, f"{dir}/target_stack_{target_idx}.png")
-                        
-                        warp = zero_mask * mesh_normal_mask.permute(0,3,1,2) * (warped_image * 0.5 + 0.5)
-                        warp_depth = mesh_normal_mask.permute(0,3,1,2) * apply_heatmap((renders['tgt_depth'] != 0) * (1 / renders['tgt_depth'])).to(device)
-                        
-                        save_image(warp, f"{dir}/warped_tgt_{target_idx}.png")
-                        save_image(warp_depth, f"{dir}/warped_depth_tgt_{target_idx}.png")
-                        
-                        if cfg.geo_first:
-                            val_img = torch.cat((zero_mask * (warped_image * 0.5 + 0.5), space, results_dict['img_pred'], space, depth, space, normal * 0.5 + 0.5, space, space, large_space, large_space, space, images["tgt"].to(device), space, gt_depth, space, gt_normal * 0.5 + 0.5), dim=-1).detach()[0]                                      
-                            save_image(val_img, f"{dir}/target_view_{target_idx}.png")
-                                                        
-                            if minmax_set:
-                                pts_loc = (ptsmap_max[None,...,None,None] - ptsmap_min[None,...,None,None]) * (results_dict['geo_pred']) + ptsmap_min[None,...,None,None]
-                            else:
-                                pts_loc = (ptsmap_max[...,None,None] - ptsmap_min[...,None,None]) * (results_dict['geo_pred']) + ptsmap_min[...,None,None]
-                            pts_rgb = results_dict['img_pred']
+            if cfg.normalized_pose:
+                extrinsic = torch.matmul(w2c[:,target_idx].unsqueeze(1), orig_extrinsic)
+                pointmaps = torch.matmul(w2c[:,target_idx][:,None,None,None,:3,:3], pointmaps[...,None]).squeeze(-1) + w2c[:,target_idx][:,None,None,None,:3,3]
+                                                                                                        
+            focal_list = []
             
-                            points = torch.cat((pts_loc, pts_rgb), dim=1).permute(0,2,3,1).reshape(B,-1,6)
-                            pts_map = torch.matmul(orig_extrinsic[:,target_idx][:,None,:3,:3], (points[...,:3] - w2c[:,target_idx][:,None,:3,3]).unsqueeze(-1))             
-                                                        
-                            pointmap_list.append(torch.cat((pts_map.squeeze(-1), points[...,3:]),dim=-1))     
+            for i in batch["intrinsic"]:
+                min_val, idx = i[0,:2,2].min(dim=-1)
+                focal_list.append(i[:,int(idx),int(idx)] * (256 / min_val))
+            
+            focal = torch.stack(focal_list)[...,None]
+                                            
+            ref_camera=dict(pose=extrinsic[:,src_idx].float(), 
+                focals=focal[:,src_idx], 
+                orig_img_size=torch.tensor([512, 512]).to(device))
+
+            tgt_camera=dict(pose=extrinsic[:,target_idx].float(),
+                focals=focal[:,target_idx],
+                orig_img_size=torch.tensor([512, 512]).to(device))
+        
+            closest_idx = find_closest_camera(reference_cameras=ref_camera["pose"], target_pose=tgt_camera["pose"])
+            camera_info = dict(ref=ref_camera, tgt=tgt_camera)
+            correspondence = dict(ref=pointmaps[:, src_idx].float(), tgt=pointmaps[:, target_idx].float())
+            current_dataset = "realestate"
+
+            # View selection from reference camera
+            search = True
+                                        
+            pts_locs = correspondence["ref"].reshape(1,-1,3)
+            pts_rgb = torch.cat(images['ref'],dim=1)[0].permute(0,2,3,1).reshape(1,-1,3)
+            search_cam = tgt_camera.copy()
+            
+            # Initial rendering                  
+            rendering, _ = reprojector(pts_locs, pts_rgb, search_cam, device=device, coord_channel=3, get_depth=False)
+            
+            overlay_grid_and_save(rendering.permute(0,3,1,2)[0], out_path="RENDERING.png")
+                                        
+            while search:
+                movement_cmd = input("Cmd [W/A/S/D translate, T/F/G/H rotate, END to finish]: ").strip().upper()
+                
+                cam_pose = search_cam["pose"]
+                search_cam["pose"] = camera_search(cam_pose[0], movement_cmd, device)
+                
+                rendering, _ = reprojector(pts_locs, pts_rgb, search_cam, device=device, coord_channel=3, get_depth=False)
+                overlay_grid_and_save(rendering.permute(0,3,1,2)[0], out_path="RENDERING.png")
+                
+                ask_continue = input("Continue searching, or no? : ")
+                
+                if ask_continue == "no":
+                    search = False
+                else:
+                    pass
+                
+            tgt_camera["pose"] = search_cam["pose"]  
+            camera_info["tgt"] = tgt_camera
+            
+            target_pose_list.append(torch.matmul(orig_extrinsic[:,target_idx],search_cam["pose"]))
+
+            tgt_depth_norm, ref_depth, mesh_pts, mesh_depth, mesh_normals, mesh_ref_normals, mesh_normal_mask, norm_depth, confidence_map, plucker, tgt_depth = mari_embedding_prep(cfg, images, correspondence, ref_camera, tgt_camera, src_idx, batch_size, device, full_condition=full_condition)
+            src_images = images["ref"]
+            
+            args = dict(
+                src_images=src_images,
+                correspondence=correspondence,
+                camera_info=camera_info,
+                embedder=embedder,
+                src_idx=src_idx,
+                tgt_idx=target_idx,
+                tgt_image=images["tgt"],
+                current_dataset=current_dataset
+            )
+
+            if cfg.use_mesh:
+                args["mesh_pts"] = mesh_pts
+                args["mesh_depth"] = mesh_depth
+            
+            if cfg.use_normal:
+                args["mesh_normals"] = mesh_normals.to(device)
+                args["mesh_ref_normals"] = mesh_ref_normals.to(device)
+
+            if cfg.use_depthmap:
+                args["ref_depth"] = norm_depth
+
+            if cfg.use_conf:
+                args["confidence"] = confidence_map
+
+            if cfg.gt_cor_reg:
+                args["gt_cor_regularize"] = True
+                
+            if cfg.embed_pointmap_norm:
+                args["pts_norm_func"] = pts_norm_func
+            
+            # Image latent preparation
+            conditions, renders = prepare_duster_embedding(**args)
+            latents = vae.encode(images["tgt"].to(weight_dtype) * 2 - 1).latent_dist.sample()
+            
+            # Geometry latent preparation
+            ref_pointmaps = correspondence["ref"].reshape(-1,512,512,3).permute(0,3,1,2)
+            tgt_pointmap = correspondence["tgt"].permute(0,3,1,2)
+            
+            if cfg.conditioning_pointmap_norm:
+                minmax_set = True if current_dataset != "realestate" else False
+                
+                if minmax_set:
+                    if cfg.train_vggt:
+                        ptsmap_min = torch.tensor([-0.6338, -0.4921, 0.4827]).to(image_enc.device)
+                        ptsmap_max = torch.tensor([ 0.6190, 0.6307, 1.6461]).to(image_enc.device)            
+                    else:   
+                        ptsmap_min = torch.tensor([-0.1798, -0.2254,  0.0593]).to(image_enc.device)
+                        ptsmap_max = torch.tensor([0.1899, 0.0836, 0.7480]).to(image_enc.device)
+                    
+                    ref_pointmaps = torch.clip((ref_pointmaps - ptsmap_min[None,...,None,None]) / (ptsmap_max[None,...,None,None] - ptsmap_min[None,...,None,None]) * 2 - 1.0, min=-1.0, max=1.0)
+                    tgt_pointmap = torch.clip((tgt_pointmap - ptsmap_min[None,...,None,None]) / (ptsmap_max[None,...,None,None] - ptsmap_min[None,...,None,None]) * 2 - 1.0, min=-1.0, max=1.0)
+
+                else:
+                    ptsmap_min = correspondence["ref"].reshape(batch_size,-1,3).min(dim=-2)[0]
+                    ptsmap_max = correspondence["ref"].reshape(batch_size,-1,3).max(dim=-2)[0]
+
+                    ref_ptsmap_min = ptsmap_min.unsqueeze(1).repeat(1,num_ref_viewpoints,1).reshape(-1,3)
+                    ref_ptsmap_max = ptsmap_max.unsqueeze(1).repeat(1,num_ref_viewpoints,1).reshape(-1,3)   
+                                                    
+                    ref_pointmaps = torch.clip((ref_pointmaps - ref_ptsmap_min[...,None,None]) / (ref_ptsmap_max[...,None,None] - ref_ptsmap_min[...,None,None]) * 2 - 1.0, min=-1.0, max=1.0)
+                    tgt_pointmap = torch.clip((tgt_pointmap - ptsmap_min[...,None,None]) / (ptsmap_max[...,None,None] - ptsmap_min[...,None,None]) * 2 - 1.0, min=-1.0, max=1.0)
+                    
+            geo_latents = vae.encode(tgt_pointmap.to(weight_dtype)).latent_dist.sample()
+            
+                                    
+            geo_latents = geo_latents.unsqueeze(2) 
+            geo_latents = geo_latents * 0.18215  
+            
+            latents = latents.unsqueeze(2)  # (b, c, 1, h, w)
+            latents = latents * 0.18215    
+
+            zero_mask = (renders["warped"][:,:1] != 0.).float()
+            warped_image = zero_mask * (renders["warped"] * 2 - 1)
+            if cfg.use_normal_mask and current_dataset != "realestate":
+                warped_image = warped_image * mesh_normal_mask.permute(0,3,1,2)  
+            warped_latents = vae.encode(warped_image).latent_dist.sample().unsqueeze(2)  
+            warped_latents = warped_latents *  0.18215    
+                                                    
+        is_warped_feat_injection = cfg.feature_fusion_type == 'warped_feature'
+        
+        noise = torch.randn_like(latents)
+
+        if cfg.noise_offset > 0.0:
+            noise += cfg.noise_offset * torch.randn(
+                (noise.shape[0], noise.shape[1], 1, 1, 1),
+                device=noise.device,
+            )
+
+        bsz = latents.shape[0]
+        
+        # Sample a random timestep for each video
+        timesteps = val_scheduler.timesteps                    
+        timesteps = timesteps.long()
+
+        uncond_fwd = random.random() < cfg.uncond_ratio
+        clip_image_list = []
+        ref_depth_list = []
+        ref_image_list = []
+
+        ref_stack = torch.cat(images["ref"], dim=1)
+        B, V, C, H, W = ref_stack.shape
+
+        ref_stack = ref_stack.reshape(-1,C,H,W) * 2 - 1 # Normalization
+
+        if cfg.use_geo_ref_unet:
+            for batch_idx, (ref_d, ref_img, clip_img) in enumerate(
+                zip(
+                    ref_pointmaps,
+                    ref_stack,
+                    clip_preprocessor(ref_stack*0.5+0.5, do_rescale=False, return_tensors="pt").pixel_values,
+                )
+            ):  
+                if uncond_fwd:
+                    clip_image_list.append(torch.zeros_like(clip_img))
+                else:
+                    clip_image_list.append(clip_img)
+                    
+                ref_depth_list.append(ref_d)
+                ref_image_list.append(ref_img)
+
+        with torch.no_grad():
+            ref_img_stack = torch.stack(ref_image_list, dim=0).to(
+                dtype=vae.dtype, device=vae.device
+            )
+            ref_image_latents = vae.encode(
+                ref_img_stack
+            ).latent_dist.sample()  # (bs, d, 64, 64)
+            ref_image_latents = ref_image_latents * 0.18215
+            
+            clip_img = torch.stack(clip_image_list, dim=0).to(
+                dtype=image_enc.dtype, device=image_enc.device
+            )
+            clip_image_embeds = image_enc(
+                clip_img.to("cuda", dtype=weight_dtype)
+            ).image_embeds
+            image_prompt_embeds = clip_image_embeds.unsqueeze(1)  # (bs, 1, d)
+            
+            if cfg.use_geo_ref_unet:
+                ref_depth_stack = torch.stack(ref_depth_list, dim=0).to(
+                    dtype=vae.dtype, device=vae.device
+                )
+                ref_depth_latents = vae.encode(
+                    ref_depth_stack
+                ).latent_dist.sample()  # (bs, d, 64, 64)
+                
+                ref_depth_latents = ref_depth_latents * 0.18215
+                        
+        initial_t = torch.tensor(
+            [999] * batch_size
+        ).to(device, dtype=torch.long)
+            
+        latents_noisy_start = val_scheduler.add_noise(
+            latents, noise, initial_t
+        )
+        
+        noisy_latents = latents_noisy_start
+        geo_noisy_latents = latents_noisy_start
+
+        # Image embeddings ------------------
+        image_prompt_embeds = image_prompt_embeds.reshape(B,V,1,-1).permute(1,0,2,3)
+        ref_image_latents = ref_image_latents.reshape(B,V,-1,64,64).permute(1,0,2,3,4)
+        task_emb = None
+        
+        if cfg.use_warped_img_cond:
+            noisy_latents = torch.cat((noisy_latents, warped_latents), dim=1)
+        
+        # Geometry embeddings ------------ (always have warped latents as condition)
+        geo_noisy_latents = torch.cat((warped_latents, geo_noisy_latents), dim=1)
+        
+        # Reference network for geometry
+        if cfg.use_geo_ref_unet:
+            ref_depth_latents = ref_depth_latents.reshape(B,V,-1,64,64).permute(1,0,2,3,4)
+            geo_ref_latents = torch.cat((ref_image_latents, ref_depth_latents), dim=2).to(weight_dtype)
+        else:
+            geo_ref_latents = None
                             
-                            if target_idx == target_idx_list[-1]:
-                                
-                                if cfg.save_everything or cfg.infer_setting=="view_search" or cfg.infer_setting=="revisit":
-                                    
-                                    torch.save(batch, f"{dir}/batch_info.pt")
-                                
-                                    ref_pts_rgb = ref_images                                
-                                    ref_points = torch.cat((batch['points'][0,src_idx], ref_pts_rgb),dim=1).permute(0,2,3,1).reshape(1,-1,6)
-                                    
-                                    torch.save(ref_points, f"{dir}/ref_pts.pt")
-                                    
-                                    pointmap_stack = torch.stack(pointmap_list, dim=0).to(device)  
-                                    torch.save(pointmap_stack, f"{dir}/all_pts.pt")
-                                    
-                                if cfg.view_select:
-                                    tgt_pose_stack = torch.cat(target_pose_list)
-                                
-                                camera_dict = {
-                                    "ref_ext": orig_extrinsic[:,src_idx][0],
-                                    "ref_focal":ref_camera['focals'][0],
-                                    "tgt_ext": orig_extrinsic[:,target_idx_list][0] if not cfg.view_select else tgt_pose_stack,
-                                    "tgt_focal": focal[:,target_idx_list][0]
-                                }
-                                
-                                torch.save(camera_dict, f"{dir}/camera_info.pt")
-                                
-                                psnr_average = sum(psnr_list) / len(psnr_list)
-                                ssim_average = sum(ssim_list) / len(ssim_list)
-                                lpips_average = sum(lpips_list) / len(lpips_list)
-                                
-                                save_image(space, f"{dir}/psnr_{psnr_average}.png")
-                                filename = f"{dir}/run_info.json"
-                                
-                                with open(filename, "w") as f:
-                                    data = {
-                                        "psnr": psnr_average,
-                                        "psnr_list": psnr_list,
-                                        "ssim": ssim_average,
-                                        "ssim_list" : ssim_list,
-                                        "lpips" : lpips_average,
-                                        "lpips_list": lpips_list, 
-                                        "target_idx": target_idx_list,
-                                        "compar_idx": [i for i in range(len(target_idx_list))],
-                                        "source_idx": src_idx,
-                                        "depth_data" : geo_data
-                                    }
-                                                                        
-                                    json.dump(data, f, indent=4)
-                                
-                    attn_proc_hooker.clear()
-                    attn_proc_hooker.attn_map_clear()                                               
+        with torch.no_grad():
+            results_dict = net(
+                noisy_latents.to(weight_dtype),
+                geo_noisy_latents.to(weight_dtype),
+                timesteps,
+                ref_image_latents.to(weight_dtype),
+                geo_ref_latents,
+                image_prompt_embeds.to(weight_dtype),
+                conditions["ref_embeds"], # V List of (B, 16, 512, 512) latents
+                conditions["tgt_embed"].to(weight_dtype), # Tensor of (B, 16, 512, 512)
+                correspondence=None,
+                weight_dtype=weight_dtype,
+                gt_target_coord_embed = conditions['gt_tgt_embed'] if conditions['gt_tgt_embed'] != None else None,
+                task_emb=task_emb,
+                attn_proc_hooker=attn_proc_hooker,
+                geo_attn_proc_hooker=geo_attn_proc_hooker,
+                closest_idx=closest_idx,
+                val_scheduler=val_scheduler,
+                vae = vae
+            )
+            
+            # Directory for this inference                      
+            exp_name = cfg.inference_run_name
+            
+            if cfg.infer_setting == "realestate_eval" or cfg.infer_setting == "dtu_eval":
+                instance_name = batch["instance_name"]
+                dir = f"{exp_name}/{now}/{instance_name}"
+            else:
+                dir = f"{exp_name}/{now}/{instance_now}"
+            
+            if not os.path.exists(dir):
+                os.makedirs(dir)
+                                        
+            # Metrics
+            depth_map = results_dict['geo_pred'][:,2:].repeat(1,3,1,1)       
+            normal = convert_depth_to_normal(depth_map[:,:1])  
+            gt_normal = convert_depth_to_normal(tgt_pointmap[:,2:] * 0.5 + 0.5)
 
-        # save model after each epoch
-        if (epoch + 1) % cfg.save_model_epoch_interval == 0 and accelerator.is_main_process:
-            unwrap_net = accelerator.unwrap_model(net)
-            save_checkpoint(
-                unwrap_net.reference_unet,
-                save_dir,
-                "reference_unet",
-                global_step,
-                total_limit=1,
-            )
-            save_checkpoint(
-                unwrap_net.denoising_unet,
-                save_dir,
-                "denoising_unet",
-                global_step,
-                total_limit=1,
-            )
-            save_checkpoint(
-                unwrap_net.pose_guider,
-                save_dir,
-                "pose_guider",
-                global_step,
-                total_limit=1,
-            )
-            save_checkpoint(
-                optimizer,
-                save_dir,
-                "optimizer",
-                global_step,
-                total_limit=1
-            )
+            depth = apply_heatmap((depth_map[:,:1] != 0)* 1 / depth_map[:,:1]).to(device)   
+            gt_depth = apply_heatmap( ((tgt_pointmap[:,2:] * 0.5 + 0.5)!=0) * 1 / (tgt_pointmap[:,2:] * 0.5 + 0.5)).to(device)  
 
-    # Create the pipeline using the trained modules and save it.
-    accelerator.wait_for_everyone()
-    accelerator.end_training()
+            ref_images = torch.cat(images["ref"]).squeeze()
+                                                                
+            # Saving the images
+            space = torch.ones(1,3,512,80).to(device)
+            large_space = torch.ones(1,3,512,420).to(device)
+                                        
+            for i, ref in enumerate(ref_images):
+                save_image(ref, f"{dir}/ref_{i}.png")  
+                                            
+            stack_img = torch.cat((images["tgt"].to(device), space, zero_mask * (warped_image * 0.5 + 0.5), space, tgt_pointmap*0.5+0.5, space, gt_depth, space, results_dict['img_pred'], space, results_dict['geo_pred'], space, depth, space, normal * 0.5 + 0.5), dim=-1).detach()[0]                    
+            save_image(stack_img, f"{dir}/target_stack_{target_idx}.png")
+            
+            warp = zero_mask * mesh_normal_mask.permute(0,3,1,2) * (warped_image * 0.5 + 0.5)
+            warp_depth = mesh_normal_mask.permute(0,3,1,2) * apply_heatmap((renders['tgt_depth'] != 0) * (1 / renders['tgt_depth'])).to(device)
+            
+            save_image(warp, f"{dir}/warped_tgt_{target_idx}.png")
+            save_image(warp_depth, f"{dir}/warped_depth_tgt_{target_idx}.png")
+            
+            if cfg.geo_first:
+                val_img = torch.cat((zero_mask * (warped_image * 0.5 + 0.5), space, results_dict['img_pred'], space, depth, space, normal * 0.5 + 0.5, space, space, large_space, large_space, space, images["tgt"].to(device), space, gt_depth, space, gt_normal * 0.5 + 0.5), dim=-1).detach()[0]                                      
+                save_image(val_img, f"{dir}/target_view_{target_idx}.png")
+                                            
+                if minmax_set:
+                    pts_loc = (ptsmap_max[None,...,None,None] - ptsmap_min[None,...,None,None]) * (results_dict['geo_pred']) + ptsmap_min[None,...,None,None]
+                else:
+                    pts_loc = (ptsmap_max[...,None,None] - ptsmap_min[...,None,None]) * (results_dict['geo_pred']) + ptsmap_min[...,None,None]
+                pts_rgb = results_dict['img_pred']
 
+                points = torch.cat((pts_loc, pts_rgb), dim=1).permute(0,2,3,1).reshape(B,-1,6)
+                pts_map = torch.matmul(orig_extrinsic[:,target_idx][:,None,:3,:3], (points[...,:3] - w2c[:,target_idx][:,None,:3,3]).unsqueeze(-1))             
+                                            
+                pointmap_list.append(torch.cat((pts_map.squeeze(-1), points[...,3:]),dim=-1))     
+                
+                if target_idx == target_idx_list[-1]:
+                    
+                    if cfg.save_everything or cfg.infer_setting=="view_search" or cfg.infer_setting=="revisit":
+                        
+                        torch.save(batch, f"{dir}/batch_info.pt")
+                    
+                        ref_pts_rgb = ref_images                                
+                        ref_points = torch.cat((batch['points'][0,src_idx], ref_pts_rgb),dim=1).permute(0,2,3,1).reshape(1,-1,6)
+                        
+                        torch.save(ref_points, f"{dir}/ref_pts.pt")
+                        
+                        pointmap_stack = torch.stack(pointmap_list, dim=0).to(device)  
+                        torch.save(pointmap_stack, f"{dir}/all_pts.pt")
+                        
+                    if cfg.view_select:
+                        tgt_pose_stack = torch.cat(target_pose_list)
+                    
+                    camera_dict = {
+                        "ref_ext": orig_extrinsic[:,src_idx][0],
+                        "ref_focal":ref_camera['focals'][0],
+                        "tgt_ext": orig_extrinsic[:,target_idx_list][0] if not cfg.view_select else tgt_pose_stack,
+                        "tgt_focal": focal[:,target_idx_list][0]
+                    }
+                    
+                    torch.save(camera_dict, f"{dir}/camera_info.pt")
+                    
+                    
+        attn_proc_hooker.clear()
+        attn_proc_hooker.attn_map_clear()                                               
 
 def save_checkpoint(model, save_dir, prefix, ckpt_num, total_limit=None):
     save_path = osp.join(save_dir, f"{prefix}-{ckpt_num}.pth")
@@ -2126,59 +1489,9 @@ def load_16bit_png_depth(depth_png):
         
     return depth
 
-# def load_16bit_png_depth(depth_png):
-#     with Image.open(depth_png) as depth_pil:
-#         # Convert to 16-bit grayscale (mode 'I' is 32-bit, so we convert properly)
-#         depth_pil = depth_pil.convert("I;16")  # Ensure 16-bit depth
-        
-#         # Resize the shorter side to 512 while keeping aspect ratio
-#         shorter_side = 512
-#         width, height = depth.shape
-#         aspect_ratio = width / height
-#         if width < height:
-#             new_width = shorter_side
-#             new_height = int(shorter_side / aspect_ratio)
-#         else:
-#             new_height = shorter_side
-#             new_width = int(shorter_side * aspect_ratio)
-        
-#         depth_pil = depth_pil.resize((new_width, new_height), Image.BILINEAR)
-
-#         # Center crop to 512x512
-#         left = (new_width - 512) // 2
-#         top = (new_height - 512) // 2
-#         depth_pil = depth_pil.crop((left, top, left + 512, top + 512))
-        
-#         # Convert image to numpy array
-#         depth = np.array(depth_pil, dtype=np.uint16)
-
-#         # Reinterpret as float16, then convert to float32
-#         depth = depth.view(np.float16).astype(np.float32)
-        
-#     return depth
-
-def load_image_as_tensor(image_path):
-    # Open the image
-    image = Image.open(image_path).convert("RGB")  # Convert to RGB to ensure consistency
-    
-    # Define transformation to convert the image to a PyTorch tensor
-    transform = transforms.Compose([
-        # transforms.Resize(512, interpolation=Image.BILINEAR),  # Resize shorter side to 512
-        # transforms.CenterCrop(512),  # Center crop to 512x512
-        transforms.ToTensor()  # Convert to tensor with values in [0,1]    ])
-    ])
-    
-    # Apply the transformation
-    image_tensor = transform(image)
-    
-    return image_tensor
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # parser.add_argument("--config", type=str, default="././train_configs/train_co3d_unified_nsml.yaml")
     parser.add_argument("--config", type=str, default="././train_configs/train_co3d_uni_inference.yaml")
-    # parser.add_argument("--config", type=str, default="././train_configs/train_co3d_unified_kaist.yaml")
     args = parser.parse_args()
 
     if args.config[-5:] == ".yaml":

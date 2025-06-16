@@ -6,4 +6,4 @@ from .pointmap_norm import PointmapNormalizer
 from .uncertainty_loss import UncertaintyLoss
 from .dataloader_utils import postprocess_co3d, postprocess_realestate, postprocess_combined, postprocess_vggt
 from .pca import compute_pca
-from .eval_utils import EvalBatch, camera_search, revisit_eval, overlay_grid_and_save
+from .eval_utils import EvalBatch, camera_search, revisit_eval, overlay_grid_and_save, mari_embedding_prep
