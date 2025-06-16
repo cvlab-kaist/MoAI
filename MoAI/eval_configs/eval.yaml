@@ -1,0 +1,70 @@
+dataset:
+  num_viewpoints: 2
+  num_ref:        1
+
+solver:
+  gradient_accumulation_steps: 1
+  mixed_precision:             'no'
+  enable_xformers_memory_efficient_attention: true
+
+find_unused_params: false
+debugging:           true
+
+# reproducibility / logging
+seed:     12580
+exp_name: 'inference'
+output_dir: './exp_output'
+
+# weight dtype for all networks
+weight_dtype: 'fp32'
+
+# scheduler
+noise_scheduler_kwargs:
+  num_train_timesteps: 1000
+  beta_start:          0.00085
+  beta_end:            0.012
+  beta_schedule:       "scaled_linear"
+  steps_offset:        1
+  clip_sample:         false
+
+enable_zero_snr: true
+
+# model paths
+vae_model_path:      './checkpoints/sd-vae-ft-mse'
+image_encoder_path:  'laion/CLIP-ViT-H-14-laion2B-s32B-b79K'
+model_path:          "./checkpoints/main_model"
+
+# eval dataset folder
+eval_image_dir: "/path/to/your/eval/images"
+
+# conditioning & feature‐fusion flags
+use_depthmap:             false
+use_normal:               false
+use_mesh:                 false
+use_conf:                 false
+gt_cor_reg:               false
+embed_pointmap_norm:      true
+conditioning_pointmap_norm: true
+use_warped_img_cond:      false
+use_normal_mask:          false
+
+feature_fusion_type: "attention_full_sharing"
+train_vggt:         true
+
+# inference‐mode flags
+inference:           true
+inference_run_name:  "MoAI_real_extrapolate"
+infer_setting:       "realestate_eval"
+save_everything:     true
+view_select:         false
+
+# geometry‐first branch
+geo_first:          true
+use_geo_ref_unet:   true
+
+# sampling / noise
+uncond_ratio: 0.1
+noise_offset: 0.05
+
+# pose normalization
+normalized_pose: true
