@@ -119,6 +119,8 @@ class EvalBatch():
         # open each file and convert to RGB PIL.Image
         pil_images = [Image.open(p).convert("RGB") for p in image_paths]
         
+        num_ref_views = len(pil_images)
+        
         images = pil_to_tensor_batch(pil_images)
         
         with torch.no_grad():
@@ -142,7 +144,7 @@ class EvalBatch():
             
             output = dict(image = images[None,...].to(self.device), points = pts[None,...].to(self.device), intrinsic = intrinsic.to(self.device), extrinsic = extrinsic.to(self.device), conf=None, dataset=[1])
         
-        return output
+        return output, num_ref_views
 
 
 def overlay_grid_and_save(img_tensor: torch.Tensor, spacing=64, out_path="grid_overlay.png"):

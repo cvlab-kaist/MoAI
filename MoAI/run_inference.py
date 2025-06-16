@@ -783,9 +783,9 @@ def main(cfg):
     lpips_fn = lpips.LPIPS(net='alex').to(device)
 
     eval_batchify = EvalBatch(device)
-    batch = eval_batchify.images_eval(image_dir=cfg.eval_image_dir)
-    src_idx = [0,1]
-    target_idx_list = [1]
+    batch, num_ref_viewpoints = eval_batchify.images_eval(image_dir=cfg.eval_image_dir)
+    src_idx = [i for i in range(num_ref_viewpoints)]
+    target_idx_list = [num_ref_viewpoints-1]
         
     instance_now = strftime("%m_%d_%H_%M_%S", gmtime())
     pointmap_list = []
