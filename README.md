@@ -2,9 +2,9 @@
 
 [![Project Site](https://img.shields.io/badge/Project-Web-green)](https://cvlab-kaist.github.io/MoAI/) &nbsp;
 [![Github](https://img.shields.io/badge/Github-Repo-orange?logo=github)](https://github.com/cvlab-kaist/MoAI) &nbsp; 
+[![arXiv](https://img.shields.io/badge/arXiv-2506.11924-red?logo=arxiv)](https://arxiv.org/abs/2506.11924) &nbsp; 
 <!-- [![Spaces](https://img.shields.io/badge/Spaces-Demo-yellow?logo=huggingface)]() &nbsp;  -->
 <!-- [![Models](https://img.shields.io/badge/Models-checkpoints-blue?logo=huggingface)]() &nbsp;  -->
-[![arXiv](https://img.shields.io/badge/arXiv-2506.11924-red?logo=arxiv)](https://arxiv.org/abs/2506.11924)
 
 [Introduction](#introduction)
 | [Demo](#demo)
