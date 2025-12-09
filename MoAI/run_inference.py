@@ -782,7 +782,7 @@ def main(cfg):
     ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
     lpips_fn = lpips.LPIPS(net='alex').to(device)
 
-    eval_batchify = EvalBatch(device)
+    eval_batchify = EvalBatch(device, recon_model = "DepthAnythingV3")
     batch, num_ref_viewpoints = eval_batchify.images_eval(image_dir=cfg.eval_image_dir)
     src_idx = [i for i in range(num_ref_viewpoints)]
     target_idx_list = [num_ref_viewpoints-1]

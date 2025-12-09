@@ -22,6 +22,9 @@ from vggt_original.utils.pose_enc import pose_encoding_to_extri_intri
 from vggt_original.models.vggt import VGGT
 from torchvision.utils import save_image
 
+from depth_anything_3.api import DepthAnything3
+from depth_anything_3.utils.visualize import visualize_depth
+
 from dacite import Config, from_dict
 from jaxtyping import Float, Int64
 
@@ -48,14 +51,22 @@ def pil_to_tensor_batch(pil_images):
 class EvalBatch():
     def __init__(
             self,
-            device   
+            device,
+            recon_model = "DepthAnythingV3"   
         ):
         self.chunk_num = 0
         self.example_num = 0
         self.device = device
         self.dtype = torch.bfloat16  # or torch.float16
-        
-        self.model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
+
+        if recon_model == "DepthAnythingV3": 
+            self.model = DepthAnything3.from_pretrained("depth-anything/DA3-LARGE").to(device)
+            self.model.eval()
+            self.model_name = "da3"
+            
+        elif recon_model == "vggt":
+            self.model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
+            self.mode_name = "vggt"
         
         self.crop_transform = tf.Compose([
             tf.Resize(512, interpolation=tf.InterpolationMode.BICUBIC),  # Resize shortest side to 512
@@ -120,27 +131,50 @@ class EvalBatch():
         pil_images = [Image.open(p).convert("RGB") for p in image_paths]
         
         num_ref_views = len(pil_images)
-        
         images = pil_to_tensor_batch(pil_images)
         
         with torch.no_grad():
-            with torch.cuda.amp.autocast(dtype=self.dtype):
-                # Time aggregator call (including adding the batch dimension)
-                images = images[None]  # add batch dimension
-                images_vggt = images_vggt[None]  # add batch dimension
-                aggregated_tokens_list, ps_idx = self.model.aggregator(images_vggt.to(self.device))
+            if self.model_name == "vggt"
+                with torch.cuda.amp.autocast(dtype=self.dtype):
+                    # Time aggregator call (including adding the batch dimension)
+                    images = images[None]  # add batch dimension
+                    images_vggt = images_vggt[None]  # add batch dimension
+                    aggregated_tokens_list, ps_idx = self.model.aggregator(images_vggt.to(self.device))
+                
+                # Time the camera head prediction
+                pose_enc = self.model.camera_head(aggregated_tokens_list)[-1]
+                
+                # Time the conversion from pose encoding to extrinsic/intrinsic matrices
+                extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, images_vggt.shape[-2:])
+                
+                # Time the point head prediction
+                point_map, point_conf = self.model.point_head(aggregated_tokens_list, images_vggt, ps_idx)
             
-            # Time the camera head prediction
-            pose_enc = self.model.camera_head(aggregated_tokens_list)[-1]
+                pts = self.transform_pts(point_map[0])
+                images = self.transform_pts(images[0].permute(0,2,3,1))
             
-            # Time the conversion from pose encoding to extrinsic/intrinsic matrices
-            extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, images_vggt.shape[-2:])
-            
-            # Time the point head prediction
-            point_map, point_conf = self.model.point_head(aggregated_tokens_list, images_vggt, ps_idx)
-        
-            pts = self.transform_pts(point_map[0])
-            images = self.transform_pts(images[0].permute(0,2,3,1))
+            elif self.model_name == "da3"
+                images = self.transform_pts(images.permute(0,2,3,1), size=504).permute(0,3,1,2)  
+                da3_imgs = [image.permute(1,2,0).detach().to("cpu").numpy() for image in images] 
+                
+                with torch.cuda.amp.autocast(dtype=self.dtype):
+                    prediction = self.model.inference(
+                            image=da3_imgs,
+                            process_res=504
+                        )    
+
+                extrinsic = prediction.extrinsics
+                intrinsic = prediction.intrinsics
+                depth_map = prediction.depth
+
+                extrinsic = torch.tensor(extrinsic).unsqueeze(0).to(device)
+                intrinsic = torch.tensor(intrinsic).unsqueeze(0).to(device)
+
+                point_map = unproject_depth_map_to_point_map(depth_map[...,None], extrinsic[0], intrinsic[0])
+
+                # import pdb; pdb.set_trace()
+                pts=self.transform_pts(torch.tensor(point_map), size=512).permute(0,3,1,2)
+                images = self.transform_pts(images.permute(0,2,3,1), size=512).permute(0,3,1,2)   
             
             output = dict(image = images[None,...].to(self.device), points = pts[None,...].to(self.device), intrinsic = intrinsic.to(self.device), extrinsic = extrinsic.to(self.device), conf=None, dataset=[1])
         
@@ -297,9 +331,6 @@ def mari_embedding_prep(cfg, images, correspondence, ref_camera, tgt_camera, src
         ref_depth = torch.clip(ref_depth, min=min_val, max=max_val).reshape(-1,512,512,1).permute(0,3,1,2).repeat(1,3,1,1)
         tgt_depth_norm = torch.clip(tgt_depth_norm, min=min_val, max=max_val).permute(0,3,1,2).repeat(1,3,1,1)
     
-    # import pdb; pdb.set_trace()
-
-    # if cfg.use_mesh:
     if cfg.downsample:
         downsample_by = cfg.downsample_by
         start = downsample_by // 2
@@ -318,11 +349,6 @@ def mari_embedding_prep(cfg, images, correspondence, ref_camera, tgt_camera, src
             tgt_rgb = images["tgt"][:,:,start::interval,start::interval].unsqueeze(1)
             rgb = torch.cat((rgb, tgt_rgb), dim=1)
         side_length = 512 // downsample_by
-
-    # else:
-    #     points = batch['points'].reshape(batch_size, -1, 3).permute(0,2,1).float()
-    #     rgb = batch['image'].permute(0,1,3,4,2).reshape(batch_size, -1, 3).permute(0,2,1)
-    #     side_length = 512 // downsample_by
 
     batch_pts = points
     batch_colors = rgb
