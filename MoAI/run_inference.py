@@ -670,10 +670,10 @@ def main(cfg):
         ).to(device=device, dtype=dtype)
 
     pose_guider           = PoseGuider(320, cond_channels).to(device=device, dtype=dtype)
-    reference_unet        = init_2d(UNet2DConditionModel, "config.json",         "reference_unet.pth")
-    denoising_unet        = init_3d(UNet3DConditionModel, "config.json",         "denoising_unet.pth")
-    geometry_unet         = init_3d(UNet3DConditionModel, "geometry_config.json","geometry_unet.pth")
-    geo_reference_unet    = init_2d(UNet2DConditionModel, "geo_ref_config.json", "geo_reference_unet.pth")
+    reference_unet        = init_2d(UNet2DConditionModel, "configs/image_config.json",         "reference_unet.pth")
+    denoising_unet        = init_3d(UNet3DConditionModel, "configs/image_config.json",         "denoising_unet.pth")
+    geometry_unet         = init_3d(UNet3DConditionModel, "configs/geometry_config.json", "geometry_unet.pth")
+    geo_reference_unet    = init_2d(UNet2DConditionModel, "configs/geometry_config.json", "geo_reference_unet.pth")
 
     pose_guider.load_state_dict(torch.load(
         join(cfg.model_path, 'pose_guider.pth'),
