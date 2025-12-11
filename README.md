@@ -65,11 +65,9 @@ pip install -r requirements_dev.txt
 > Models and checkpoints provided below may be distributed under different licenses. Users are required to check licenses carefully on their behalf.
 
 1. Our finetuned models:
-    Download of finetuned models will soon be available.
+    Download our checkpoints from our MoAI [Huggingface Hub](minseop-kwak/moai-checkpoints).
 
 2. Pretrained models:
-    - [sd-vae-ft-mse](https://huggingface.co/stabilityai/sd-vae-ft-mse)
-      - download `config.json` and `diffusion_pytorch_model.safetensors` to `checkpoints/sd-vae-ft-mse`
     - [sd-image-variations-diffusers](https://huggingface.co/lambdalabs/sd-image-variations-diffusers)
       - download `image_encoder/config.json` and `image_encoder/pytorch_model.bin` to `checkpoints/image_encoder`
 
@@ -81,17 +79,15 @@ MoAI
     ├── image_encoder
     │   ├── config.json
     │   └── pytorch_model.bin
+    ├── configs
+    │   ├── image_config.json
+    │   └── geometry_config.json
     ├── main
-    │   ├── config.json
-    │   ├── geometry_config.json
     │   ├── denoising_unet.pth
     │   ├── geometry_unet.pth
     │   ├── pose_guider.pth
     │   ├── geo_reference_unet.pth
     │   └── reference_unet.pth
-    └── sd-vae-ft-mse
-        ├── config.json
-        └── diffusion_pytorch_model.safetensors
 ```
 
 ### Inference
@@ -105,64 +101,6 @@ git clone https://github.com/facebookresearch/vggt.git
 ```
 
 To use VGGT, please install `requirements_dev.txt` for additional packages.
-
-<!-- **Initialization**
-
-Import MoAI class and instantiate it with a config. Set the path to the checkpoints directory to `pretrained_model_path` and select the model version in `checkpoint_name`. For more options, check out [run_inference.py](MoAI/run_inference.py)
-
-``` python
-from main import MoAI
-
-moai_cfg = dict(
-    pretrained_model_path='./checkpoints',
-    checkpoint_name='multi1',
-    half_precision_weights=True
-)
-moai_nvs = MoAI(cfg=moai_full_cfg)
-
-``` -->
-
-<!-- #### API
-
-**Input Preparation**
-
-Load the input image and estimate the corresponding depth map. Create camera matrices for the intrinsic and extrinsic parameters. [ops.py](genwarp/ops.py) has helper functions to create matrices.
-
-``` python
-from PIL import Image
-from torchvision.transforms.functional import to_tensor
-
-src_image = to_tensor(Image.open(image_file).convert('RGB'))[None].cuda()
-src_depth = depth_estimator.infer(src_image)
-```
-
-``` python
-import torch
-from ops import camera_lookat, get_projection_matrix
-
-proj_mtx = get_projection_matrix(
-    fovy=fovy,
-    aspect_wh=1.,
-    near=near,
-    far=far
-)
-
-src_view_mtx = camera_lookat(
-    torch.tensor([[0., 0., 0.]]),  # From (0, 0, 0)
-    torch.tensor([[-1., 0., 0.]]), # Cast rays to -x
-    torch.tensor([[0., 0., 1.]])   # z-up
-)
-
-tar_view_mtx = camera_lookat(
-    torch.tensor([[-0.1, 2., 1.]]), # Camera eye position
-    torch.tensor([[-5., 0., 0.]]),  # Looking at.
-    z_up  # z-up
-)
-
-rel_view_mtx = (
-    tar_view_mtx @ torch.linalg.inv(src_view_mtx.float())
-).to(src_image)
-``` -->
 
 ## Citation
 
