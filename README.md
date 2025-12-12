@@ -128,12 +128,14 @@ Place your input images in this directory before running inference.
 
 #### Interactive Camera Control
 
-MoAI provides an interactive camera search tool (located in `main/utils/eval_utils.py`) that allows you to manually control the target camera viewpoint. The system projects the reference image's point cloud into the target view, rendering a preview that updates in real-time as you adjust the camera pose.
+MoAI provides an interactive camera search tool that allows you to manually control the target camera viewpoint. The system projects the reference image's point cloud into the target view, rendering a preview that updates in real-time as you adjust the camera pose.
 
 During this process, a preview image (`RENDERING.png`) is saved after each adjustment, showing the projected point cloud from the current camera viewpoint. This allows you to interactively find the desired novel view before running the full generation pipeline.
 
-<details>
-<summary><b>Camera Control Commands (Optional)</b></summary>
+**Camera Control Commands (Optional)**
+
+You can adjust the `t_step` (translation) and `r_step` (rotation) values in the code below (located in `main/utils/eval_utils.py`) for more fine-grained or coarser camera control.
+
 ```python
 def camera_search(cam, cmd, device):
     """
@@ -160,8 +162,6 @@ def camera_search(cam, cmd, device):
     
     return cam[None,...]
 ```
-
-</details>
 
 ## Citation
 
