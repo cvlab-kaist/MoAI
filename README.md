@@ -90,9 +90,9 @@ MoAI
     │   └── reference_unet.pth
 ```
 
-### Inference Instructions
+## Inference Instructions
 
-#### (Recommended) Install VGGT module
+### (Recommended) Install VGGT module
 
 The model requires multiview geometry prediction to generate novel views. To this end, users can install one of multiview geometry prediction models publicly available. We used and recommend VGGT.
 ``` shell
@@ -101,7 +101,7 @@ git clone https://github.com/facebookresearch/vggt.git
 
 To use VGGT, please install `requirements_dev.txt` for additional packages.
 
-#### Configuration Setup
+### Configuration Setup
 
 Before running inference, configure the following parameters in `eval_configs/eval.yaml`:
 
@@ -124,7 +124,7 @@ eval_images_dir: "./images"
 
 Place your input images in this directory before running inference.
 
-**3. Interactive Target Camera Control**
+### Interactive Target Camera Control
 
 MoAI provides an interactive camera search tool that allows you to manually control the target camera viewpoint. The system projects the reference image's point cloud into the target view, rendering a preview that updates in real-time as you adjust the camera pose.
 
