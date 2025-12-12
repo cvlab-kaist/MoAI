@@ -90,17 +90,78 @@ MoAI
     │   └── reference_unet.pth
 ```
 
-### Inference
+### Inference Instructions
 
 #### (Recommended) Install VGGT module
 
 The model requires multiview geometry prediction to generate novel views. To this end, users can install one of multiview geometry prediction models publicly available. We used and recommend VGGT.
-
 ``` shell
 git clone https://github.com/facebookresearch/vggt.git
 ```
 
 To use VGGT, please install `requirements_dev.txt` for additional packages.
+
+#### Configuration Setup
+
+Before running inference, configure the following parameters in `eval_configs/eval.yaml`:
+
+**1. Dataset Configuration**
+
+Control the number of novel views and reference images:
+```yaml
+dataset:
+  num_viewpoints: 1  # Number of novel views to generate
+  num_ref:        1  # Number of reference images to use
+```
+
+- `num_viewpoints`: Sets how many novel view images will be generated
+- `num_ref`: Specifies the number of input reference images
+
+**2. Reference Images Directory**
+
+Specify the directory containing your reference images:
+```yaml
+eval_images_dir: "./images"
+```
+
+Place your input images in this directory before running inference.
+
+#### Interactive Camera Control
+
+MoAI provides an interactive camera search tool (located in `main/utils/eval_utils.py`) that allows you to manually control the target camera viewpoint. The system projects the reference image's point cloud into the target view, rendering a preview that updates in real-time as you adjust the camera pose.
+
+During this process, a preview image (`RENDERING.png`) is saved after each adjustment, showing the projected point cloud from the current camera viewpoint. This allows you to interactively find the desired novel view before running the full generation pipeline.
+
+<details>
+<summary><b>Camera Control Commands (Optional)</b></summary>
+```python
+def camera_search(cam, cmd, device):
+    """
+    Adjusts camera pose based on user input commands.
+    
+    Translation commands (step size: 0.15):
+    - W/S: Move forward/backward along z-axis
+    - A/D: Move left/right along x-axis
+    
+    Rotation commands (step size: 10°):
+    - T/G: Pitch up/down (rotation around x-axis)
+    - F/H: Yaw left/right (rotation around y-axis)
+    """
+    t_step = 0.15  # Translation step size
+    r_step = 10.0  # Rotation step in degrees
+
+    if cmd == 'W':
+        T = make_translation_matrix(0, 0, t_step, device)
+        cam = T @ cam
+    elif cmd == 'S':
+        T = make_translation_matrix(0, 0, -t_step, device)
+        cam = T @ cam
+    # ... [additional movement commands]
+    
+    return cam[None,...]
+```
+
+</details>
 
 ## Citation
 

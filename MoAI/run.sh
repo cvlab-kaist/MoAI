@@ -1,0 +1,1 @@
+python run_inference.py --config eval_configs/eval.yaml

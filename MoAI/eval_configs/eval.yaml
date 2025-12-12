@@ -1,5 +1,5 @@
 dataset:
-  num_viewpoints: 2
+  num_viewpoints: 1
   num_ref:        1
 
 solver:
@@ -35,7 +35,7 @@ image_encoder_path:  'laion/CLIP-ViT-H-14-laion2B-s32B-b79K'
 model_path:          "./checkpoints/main_model"
 
 # eval dataset folder
-eval_images_dir: "/path/to/your/eval/images"
+eval_images_dir: "./images"
 
 # conditioning & feature‐fusion flags
 use_depthmap:             false

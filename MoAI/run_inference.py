@@ -651,7 +651,7 @@ def main(cfg):
     
     device, dtype = "cuda", weight_dtype
     num_viewpoints = cfg.dataset.num_viewpoints
-    num_ref_viewpoints = cfg.dataset.num_ref
+    num_ref_viewpoints = num_viewpoints
         
     def init_2d(model_cls, config_fname, weight_fname, **init_kwargs):
         cfg_path = join(cfg.model_path, config_fname)
@@ -785,7 +785,7 @@ def main(cfg):
     eval_batchify = EvalBatch(device, recon_model = "DepthAnythingV3")
     batch, num_ref_viewpoints = eval_batchify.images_eval(image_dir=cfg.eval_image_dir)
     src_idx = [i for i in range(num_ref_viewpoints)]
-    target_idx_list = [num_ref_viewpoints-1]
+    target_idx_list = [-1]
         
     instance_now = strftime("%m_%d_%H_%M_%S", gmtime())
     pointmap_list = []
@@ -927,7 +927,6 @@ def main(cfg):
                     
             geo_latents = vae.encode(tgt_pointmap.to(weight_dtype)).latent_dist.sample()
             
-                                    
             geo_latents = geo_latents.unsqueeze(2) 
             geo_latents = geo_latents * 0.18215  
             
