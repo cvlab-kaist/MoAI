@@ -130,7 +130,7 @@ MoAI provides an interactive camera search tool that allows you to manually cont
 
 During this process, a preview image (`RENDERING.png`) is saved after each adjustment, showing the projected point cloud from the current camera viewpoint. This allows you to interactively find the desired novel view before running the full generation pipeline.
 
-**Camera Control Commands (Optional)**
+**(Optional) Camera Control Commands**
 
 You can adjust the `t_step` (translation) and `r_step` (rotation) values in the code below (located in `main/utils/eval_utils.py`) for more fine-grained or coarser camera control.
 
