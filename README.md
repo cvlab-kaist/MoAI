@@ -65,7 +65,7 @@ pip install -r requirements_dev.txt
 > Models and checkpoints provided below may be distributed under different licenses. Users are required to check licenses carefully on their behalf.
 
 1. Our finetuned models:
-    Download our checkpoints from our MoAI [Huggingface Hub](minseop-kwak/moai-checkpoints).
+    Download our checkpoints from our MoAI [Huggingface Hub](https://huggingface.co/minseop-kwak/moai-checkpoints).
 
 2. Pretrained models:
     - [sd-image-variations-diffusers](https://huggingface.co/lambdalabs/sd-image-variations-diffusers)
