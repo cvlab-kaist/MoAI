@@ -107,15 +107,13 @@ Before running inference, configure the following parameters in `eval_configs/ev
 
 **1. Dataset Configuration**
 
-Control the number of novel views and reference images:
+Specify the number of reference images:
 ```yaml
 dataset:
-  num_viewpoints: 1  # Number of novel views to generate
-  num_ref:        1  # Number of reference images to use
+  num_viewpoints: 1  # Shoudl match the number of images at the reference images director
 ```
 
-- `num_viewpoints`: Sets how many novel view images will be generated
-- `num_ref`: Specifies the number of input reference images
+- `num_viewpoints`: Specifies the number of input reference images
 
 **2. Reference Images Directory**
 
