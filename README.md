@@ -126,7 +126,7 @@ eval_images_dir: "./images"
 
 Place your input images in this directory before running inference.
 
-#### Interactive Camera Control
+**3. Interactive Target Camera Control**
 
 MoAI provides an interactive camera search tool that allows you to manually control the target camera viewpoint. The system projects the reference image's point cloud into the target view, rendering a preview that updates in real-time as you adjust the camera pose.
 
