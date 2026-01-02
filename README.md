@@ -148,7 +148,7 @@ MoAI provides an **interactive camera positioning system** that lets you manuall
 **3.1 Start the Inference Process**
 
 ```shell
-python inference.py  # Or your main inference script
+bash run.sh  # Or your main inference script
 ```
 
 **3.2 Interactive Camera Search**
