@@ -170,6 +170,7 @@ When prompted, you'll see a preview image (`RENDERING.png`) showing the projecte
 
 **3.3 Interactive Workflow**
 
+```
 1. System displays initial rendering in RENDERING.png
 2. Enter camera movement command (e.g., "W" to move forward)
 3. System updates RENDERING.png with new viewpoint
@@ -177,6 +178,7 @@ When prompted, you'll see a preview image (`RENDERING.png`) showing the projecte
    - Type anything to continue adjusting
    - Type "no" to finalize this viewpoint and start generation
 5. Repeat steps 2-4 until satisfied with the camera position
+```
 
 **Example Session:**
 ```
