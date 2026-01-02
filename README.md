@@ -198,9 +198,24 @@ Continue searching, or no?: no
 
 #### Step 4: View Results
 
-After the generation completes, your output will be saved to the configured output directory. The generated files include:
-- Novel view image
-- Corresponding geometry/depth map
+After the generation completes, your outputs will be saved in a timestamped directory structure:
+
+```
+<inference_run_name>/
+└── <date>/
+    └── <timestamp>/
+        ├── ref_0.png              # Reference image 1
+        ├── ref_1.png              # Reference image 2 (if multiple refs)
+        ├── ref_2.png              # Reference image 3 (if multiple refs)
+        ├── target_stack_<idx>.png # Comprehensive visualization stack
+        ├── target_view_<idx>.png  # Clean comparison view
+        ├── warped_tgt_<idx>.png   # Warped reference view
+        ├── warped_depth_tgt_<idx>.png # Warped depth map
+        ├── ref_pts.pt             # Reference point cloud data
+        ├── all_pts.pt             # All generated point clouds
+        ├── camera_info.pt         # Camera parameters
+        └── batch_info.pt          # Full batch information (optional)
+```
 
 ### Advanced Configuration
 
