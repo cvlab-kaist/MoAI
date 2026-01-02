@@ -654,7 +654,7 @@ def main(cfg):
     num_ref_viewpoints = num_viewpoints
         
     def init_2d(model_cls, config_fname, weight_fname, **init_kwargs):
-        cfg_path = join(cfg.model_path, config_fname)
+        cfg_path = join(cfg.model_path, "configs", config_fname)
         model = model_cls.from_config(model_cls.load_config(cfg_path), **init_kwargs)
         model.to(device=device, dtype=dtype)
         model.load_state_dict(torch.load(
@@ -787,12 +787,12 @@ def main(cfg):
     src_idx = [i for i in range(num_ref_viewpoints)]
     target_idx_list = [-1]
         
-    instance_now = strftime("%m_%d_%H_%M_%S", gmtime())
     pointmap_list = []
     target_pose_list = []
 
     for target_idx in target_idx_list:
-        
+
+        instance_now = strftime("%m_%d_%H_%M_%S", gmtime())
         images = dict(ref=[batch["image"][:,k].unsqueeze(1) for k in src_idx], tgt=batch["image"][:,target_idx])
 
         with torch.no_grad():

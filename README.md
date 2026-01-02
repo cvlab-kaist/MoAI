@@ -90,75 +90,157 @@ MoAI
     │   └── reference_unet.pth
 ```
 
-## Inference Instructions
+### Prerequisites
 
-### (Recommended) Install VGGT module
+**1. Install VGGT Module (Recommended)**
 
-The model requires multiview geometry prediction to generate novel views. To this end, users can install one of multiview geometry prediction models publicly available. We used and recommend VGGT.
-``` shell
+The model requires multiview geometry prediction to generate novel views. We recommend installing VGGT:
+
+```shell
 git clone https://github.com/facebookresearch/vggt.git
 ```
 
-To use VGGT, please install `requirements_dev.txt` for additional packages.
+> **Note:** VGGT requires additional packages from `requirements_dev.txt`. Install them if you haven't already:
+> ```shell
+> pip install -r requirements_dev.txt
+> ```
 
-### Configuration Setup
+### Step-by-Step Inference Guide
 
-Before running inference, configure the following parameters in `eval_configs/eval.yaml`:
+#### Step 1: Prepare Your Input Images
 
-**1. Dataset Configuration**
+1. Create a directory for your reference images (default: `./images`)
+2. Place your input images in this directory
+3. Supported formats: Standard image formats (`.jpg`, `.png`, etc.)
 
-Specify the number of reference images (should match the number of images at the reference images directory):
+**Example:**
+```
+MoAI/
+└── images/
+    ├── view1.jpg
+    ├── view2.jpg
+    └── view3.jpg
+```
+
+#### Step 2: Configure the Inference Settings
+
+Edit `eval_configs/eval.yaml` to match your setup:
+
+**2.1 Set the Number of Reference Images**
+
+Update `num_viewpoints` to match the number of images in your reference directory:
+
 ```yaml
 dataset:
-  num_viewpoints: 1
+  num_viewpoints: 3  # Change this to match your number of input images
 ```
 
-- `num_viewpoints`: Specifies the number of input reference images
+**2.2 Set the Reference Images Directory**
 
-**2. Reference Images Directory**
-
-Specify the directory containing your reference images:
 ```yaml
-eval_images_dir: "./images"
+eval_images_dir: "./images"  # Path to your input images
 ```
 
-Place your input images in this directory before running inference.
+#### Step 3: Run Inference with Interactive Camera Control
 
-### Interactive Target Camera Control
+MoAI provides an **interactive camera positioning system** that lets you manually control the target viewpoint before generating the novel view.
 
-MoAI provides an interactive camera search tool that allows you to manually control the target camera viewpoint. The system projects the reference image's point cloud into the target view, rendering a preview that updates in real-time as you adjust the camera pose.
+**3.1 Start the Inference Process**
 
-During this process, a preview image (`RENDERING.png`) is saved after each adjustment, showing the projected point cloud from the current camera viewpoint. This allows you to interactively find the desired novel view before running the full generation pipeline.
+```shell
+python inference.py  # Or your main inference script
+```
 
-**(Optional) Camera Control Commands**
+**3.2 Interactive Camera Search**
 
-You can adjust the `t_step` (translation) and `r_step` (rotation) values in the code below (located in `main/utils/eval_utils.py`) for more fine-grained or coarser camera control.
+When prompted, you'll see a preview image (`RENDERING.png`) showing the projected point cloud from the current camera viewpoint.
+
+**Camera Control Commands:**
+
+| Command | Action | Description |
+|---------|--------|-------------|
+| `W` | Move Forward | Translate camera along z-axis (+0.15 units) |
+| `S` | Move Backward | Translate camera along z-axis (-0.15 units) |
+| `A` | Move Left | Translate camera along x-axis (-0.15 units) |
+| `D` | Move Right | Translate camera along x-axis (+0.15 units) |
+| `T` | Pitch Up | Rotate camera around x-axis (+10°) |
+| `G` | Pitch Down | Rotate camera around x-axis (-10°) |
+| `F` | Yaw Left | Rotate camera around y-axis (+10°) |
+| `H` | Yaw Right | Rotate camera around y-axis (-10°) |
+
+**3.3 Interactive Workflow**
+
+```
+1. System displays initial rendering in RENDERING.png
+2. Enter camera movement command (e.g., "W" to move forward)
+3. System updates RENDERING.png with new viewpoint
+4. When prompted "Continue searching, or no?":
+   - Type anything to continue adjusting
+   - Type "no" to finalize this viewpoint and start generation
+5. Repeat steps 2-4 until satisfied with the camera position
+```
+
+**Example Session:**
+```
+Cmd [W/A/S/D translate, T/F/G/H rotate, END to finish]: W
+[RENDERING.png updated]
+Continue searching, or no?: yes
+
+Cmd [W/A/S/D translate, T/F/G/H rotate, END to finish]: T
+[RENDERING.png updated]
+Continue searching, or no?: yes
+
+Cmd [W/A/S/D translate, T/F/G/H rotate, END to finish]: D
+[RENDERING.png updated]
+Continue searching, or no?: no
+[Generation starts...]
+```
+
+#### Step 4: View Results
+
+After the generation completes, your output will be saved to the configured output directory. The generated files include:
+- Novel view image
+- Corresponding geometry/depth map
+
+### Advanced Configuration
+
+#### Fine-Tune Camera Control Sensitivity
+
+You can adjust the camera movement step sizes by editing `main/utils/eval_utils.py`:
 
 ```python
 def camera_search(cam, cmd, device):
-    """
-    Adjusts camera pose based on user input commands.
-    
-    Translation commands (step size: 0.15):
-    - W/S: Move forward/backward along z-axis
-    - A/D: Move left/right along x-axis
-    
-    Rotation commands (step size: 10°):
-    - T/G: Pitch up/down (rotation around x-axis)
-    - F/H: Yaw left/right (rotation around y-axis)
-    """
-    t_step = 0.15  # Translation step size
-    r_step = 10.0  # Rotation step in degrees
+    t_step = 0.15  # Translation step size (smaller = finer control)
+    r_step = 10.0  # Rotation step in degrees (smaller = finer control)
+    # ...
+```
 
-    if cmd == 'W':
-        T = make_translation_matrix(0, 0, t_step, device)
-        cam = T @ cam
-    elif cmd == 'S':
-        T = make_translation_matrix(0, 0, -t_step, device)
-        cam = T @ cam
-    # ... [additional movement commands]
-    
-    return cam[None,...]
+**Recommendations:**
+- For precise positioning: `t_step = 0.05`, `r_step = 5.0`
+- For quick exploration: `t_step = 0.3`, `r_step = 20.0`
+
+#### Configuration Options
+
+The `eval_configs/eval.yaml` file contains additional settings you can modify:
+
+```yaml
+# Normalization settings
+normalized_pose: true
+
+# Feature conditioning
+use_mesh: true
+use_normal: true
+use_depthmap: true
+use_conf: true
+
+# Model architecture options
+use_geo_ref_unet: true
+use_warped_img_cond: true
+feature_fusion_type: 'warped_feature'
+
+# Noise configuration
+noise_offset: 0.0
+uncond_ratio: 0.1
 ```
 
 ## Citation
