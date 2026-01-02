@@ -207,10 +207,8 @@ After the generation completes, your outputs will be saved in a timestamped dire
         ├── ref_0.png              # Reference image 1
         ├── ref_1.png              # Reference image 2 (if multiple refs)
         ├── ref_2.png              # Reference image 3 (if multiple refs)
-        ├── target_stack_<idx>.png # Comprehensive visualization stack
+        ├── target_stack_<idx>.png # Comprehensive visualization stack with image and geometry (depth map) included
         ├── target_view_<idx>.png  # Clean comparison view
-        ├── warped_tgt_<idx>.png   # Warped reference view
-        ├── warped_depth_tgt_<idx>.png # Warped depth map
         ├── ref_pts.pt             # Reference point cloud data
         ├── all_pts.pt             # All generated point clouds
         ├── camera_info.pt         # Camera parameters
